@@ -1,0 +1,567 @@
+'use strict';
+// Headless-порт нового ядра "Эволюционера": организм-центричная модель.
+// Единица симуляции — ТЕЛО (организм), а не клетка. Тело имеет генетически
+// заданную форму, общий пул энергии, общий возраст и умирает целиком.
+
+const COLS = 46, ROWS = 92, N = COLS * ROWS;
+const idx = (x, y) => y * COLS + x;
+const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
+
+const PHOTO_GAIN = 3.0, MOVE_COST = 0.16, MACRO_MUT_CHANCE = 0.13;
+const RELEASE = { photo: 2.2, herb: 2.8, pred: 4.2, sapro: 1.8 };
+const SPORE_CAP = 1.0, SPORE_DEPOSIT = 0.06, SPORE_DECAY = 0.996,
+      SPORE_THRESHOLD = 0.25, GERMINATE_CHANCE = 0.02;
+
+// --- специализация клеток по положению в теле (п.4) ---
+const BORDER_SYNTH = 0.75;      // барьерная клетка хуже синтезирует
+const INTERIOR_SYNTH = 3.00;    // внутренняя — лучше
+const BORDER_ARMOR_BONUS = 0.45;// барьерная лучше защищает
+const INTERIOR_PROCESS = 0.35;
+const GROWTH_COST_FRAC = 0.20;  // вырастить свою клетку много дешевле, чем снарядить потомка
+const AGE_SCALE = Math.sqrt;    // старение растёт с размером тела, но не линейно  // вырастить свою клетку дешевле, чем породить организм  // внутренние перерабатывают добытое барьером
+
+const GENES = ['metab','effic','thresh','costFrac','minN','maxN','aggression','armor',
+               'photo','herb','sapro','cycleHours','moveSpeed','lifespan','broodSize',
+               'shapeType','shapeA','shapeB'];
+const RANGE = {
+  metab:[0.15,1.7], effic:[0.3,1.6], thresh:[4,40], costFrac:[0.2,0.9],
+  minN:[0,4], maxN:[1,8], aggression:[0,1], armor:[0,1], photo:[0,1], herb:[0,1],
+  sapro:[0,1], cycleHours:[4,1200], moveSpeed:[0.15,1], lifespan:[100,12000],
+  broodSize:[1,4], shapeType:[0,3], shapeA:[1,5], shapeB:[1,5],
+};
+const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
+                photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150 };
+const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
+
+let state = new Uint8Array(N);        // 0 пусто, 1 живая клетка, 2 труп
+let owner = new Int32Array(N);        // id тела, которому принадлежит клетка (0 = ничьё)
+let corpseFood = new Float32Array(N);
+let sporeDensity = new Float32Array(N);
+let fertility = new Float32Array(N);
+let vGrad = new Float32Array(ROWS);
+const borderMark = new Uint8Array(N);   // переиспользуемый маркер границы (без аллокаций в горячем цикле)
+let borderBuf = new Int32Array(4096); // переиспользуемый буфер барьерных клеток
+
+let bodies = new Map();
+let nextBodyId = 1, nextLineageId = 1;
+let hours = 0, phaseX = 0, phaseY = 0, dayFactor = 1;
+const order = [];   // переиспользуемый буфер обхода тел
+let params = { mutation: 0.12, decomp: 0.3, predation: true, dayNight: true };
+function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0,
+  dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0,
+  bornBy:{photo:0,herb:0,pred:0,sapro:0}, diedBy:{photo:0,herb:0,pred:0,sapro:0},
+  lifeBy:{photo:0,herb:0,pred:0,sapro:0}, fedBy:{photo:0,herb:0,pred:0,sapro:0} }; }
+let stats = freshStats();
+// поклассовый учёт экономики: uni = одноклеточные, multi = достроенные тела >1 клетки
+let acct = { uni:{h:0,cells:0,inc:0,upk:0,kids:0}, multi:{h:0,cells:0,inc:0,upk:0,kids:0} };
+function acctReset(){ acct = { uni:{h:0,cells:0,inc:0,upk:0,kids:0}, multi:{h:0,cells:0,inc:0,upk:0,kids:0} }; }
+
+// ---------- шаблоны формы ----------
+const tplCache = new Map();
+function templateOf(type, a, b) {
+  if (type >= 2) { a = Math.min(a, 3); b = Math.min(b, 3); }
+  const key = type + ':' + a + ':' + b;
+  if (tplCache.has(key)) return tplCache.get(key);
+  let cells = [];
+  if (type === 0) { for (let y = 0; y < a; y++) for (let x = 0; x < a; x++) cells.push([x, y]); }
+  else if (type === 1) { for (let y = 0; y < b; y++) for (let x = 0; x < a; x++) cells.push([x, y]); }
+  else if (type === 2) { const r = a - 0.5, d = 2 * a - 1, c = a - 1;
+    for (let y = 0; y < d; y++) for (let x = 0; x < d; x++)
+      if ((x-c)*(x-c) + (y-c)*(y-c) <= r*r + 0.01) cells.push([x, y]); }
+  else { const w = 2*a-1, h = 2*b-1, cx = a-1, cy = b-1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+      if (((x-cx)*(x-cx))/((a-0.5)*(a-0.5)) + ((y-cy)*(y-cy))/((b-0.5)*(b-0.5)) <= 1.01) cells.push([x, y]); }
+  let mnx = Math.min(...cells.map(c=>c[0])), mny = Math.min(...cells.map(c=>c[1]));
+  cells = cells.map(c => [c[0]-mnx, c[1]-mny]);
+  const cx = (Math.max(...cells.map(c=>c[0]))) / 2, cy = (Math.max(...cells.map(c=>c[1]))) / 2;
+  // порядок заполнения — от центра наружу: сначала формируется сердцевина
+  cells.sort((p,q) => ((p[0]-cx)**2+(p[1]-cy)**2) - ((q[0]-cx)**2+(q[1]-cy)**2));
+  tplCache.set(key, cells);
+  return cells;
+}
+
+const noff = []; for (let dy=-1;dy<=1;dy++) for (let dx=-1;dx<=1;dx++) if (dx||dy) noff.push([dx,dy]);
+const noff2 = []; for (let dy=-2;dy<=2;dy++) for (let dx=-2;dx<=2;dx++) if (dx||dy) noff2.push([dx,dy]);
+const senseOffsets = [];
+for (let dy=-6;dy<=6;dy++) for (let dx=-6;dx<=6;dx++) {
+  if (!dx && !dy) continue; const d = Math.hypot(dx,dy); if (d<=6) senseOffsets.push([dx,dy,d]);
+}
+senseOffsets.sort((p,q)=>p[2]-q[2]);
+
+function computeFertility() {
+  for (let y=0;y<ROWS;y++) for (let x=0;x<COLS;x++) {
+    const n = 0.5 + 0.5*Math.sin(x*0.16+phaseX)*Math.cos(y*0.11+phaseY) + 0.2*Math.sin((x+y)*0.07+phaseX*0.5);
+    fertility[idx(x,y)] = clamp(0.7 + 0.45*n, 0.45, 1.15);
+  }
+}
+
+function guildOfGenome(g) {
+  let best = 'photo', bv = g.photo;
+  if (g.herb > bv) { best = 'herb'; bv = g.herb; }
+  if (g.aggression > bv) { best = 'pred'; bv = g.aggression; }
+  if (g.sapro > bv) { best = 'sapro'; bv = g.sapro; }
+  return best;
+}
+
+// ---------- организм ----------
+function tryPlaceBody(g, lineage, anchorX, anchorY, energy) {
+  const tpl = templateOf(g.shapeType, g.shapeA, g.shapeB);
+  const [sdx, sdy] = tpl[0];                 // первая клетка шаблона — центр
+  const ox = anchorX - sdx, oy = anchorY - sdy;
+  const w = Math.max(...tpl.map(c=>c[0])) + 1, h = Math.max(...tpl.map(c=>c[1])) + 1;
+  if (ox < 0 || oy < 0 || ox + w > COLS || oy + h > ROWS) return null;
+  const i0 = idx(anchorX, anchorY);
+  if (state[i0] !== 0) return null;
+  // План формы — НАМЕРЕНИЕ, а не бронь. Тело строит из него то, что успеет занять,
+  // и живёт недостроенным, если соседи забрали часть клеток. Требовать весь контур
+  // свободным нельзя: в решётке, забитой одноклеточными, такого места не находится
+  // никогда, и многоклеточность тогда не возникает в принципе (проверено прогонами:
+  // вспышка на 2000-м часу и полное исчезновение к 10000-му).
+  const foot = [];
+  for (const [dx,dy] of tpl) foot.push(idx(ox+dx, oy+dy));
+  const id = nextBodyId++;
+  const body = { id, g, lineage, guild: guildOfGenome(g), ox, oy, tpl,
+                 cells: [i0], foot, energy, age: 0, cooldown: g.cycleHours };
+  state[i0] = 1; owner[i0] = id;
+  // зачаток сразу занимает небольшой комок плана — настолько, насколько есть место
+  const want = Math.min(foot.length, 1 + Math.floor(foot.length/3));
+  for (let k=0; k<foot.length && body.cells.length<want; k++) {
+    const t = foot[k];
+    if (state[t] === 0 && adjacentToBody(body, t)) { state[t]=1; owner[t]=id; body.cells.push(t); }
+  }
+  bodies.set(id, body);
+  stats.born++; stats.bornBy[body.guild]++;
+  return body;
+}
+
+function adjacentToBody(body, t) {
+  const x = t % COLS, y = (t / COLS) | 0;
+  for (const [dx,dy] of noff) {
+    const nx=x+dx, ny=y+dy;
+    if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+    const ni = idx(nx,ny);
+    if (state[ni]===1 && owner[ni]===body.id) return true;
+  }
+  return false;
+}
+
+// Барьерной считается клетка, у которой хоть один ОРТОГОНАЛЬНЫЙ сосед не свой.
+// Раньше проверялись все восемь: у правильного квадрата это верно, но после отказа
+// от резервирования формы стали рваными, и клетки, окружённой своими со всех восьми
+// сторон, не встречалось даже в теле из 11 — дифференцировка не включалась никогда.
+// По диагонали контакт слабый, барьером он не является.
+const noff4 = [[0,-1],[0,1],[-1,0],[1,0]];
+function isBorder(body, i) {
+  const x = i % COLS, y = (i / COLS) | 0;
+  for (const [dx,dy] of noff4) {
+    const nx = x+dx, ny = y+dy;
+    if (nx<0||nx>=COLS||ny<0||ny>=ROWS) return true;
+    if (owner[idx(nx,ny)] !== body.id || state[idx(nx,ny)] !== 1) return true;
+  }
+  return false;
+}
+
+function killBody(body, corpseFrac) {
+  // умирает целиком: каждая клетка тела становится трупом одновременно
+  const rel = RELEASE[body.guild] * (corpseFrac === undefined ? 1 : corpseFrac);
+  for (const i of body.cells) { if (rel > 0.001) { state[i]=2; corpseFood[i]=rel; } else state[i]=0; owner[i] = 0; }
+  bodies.delete(body.id);
+  stats.died++; stats.diedBy[body.guild]++; stats.lifeBy[body.guild] += body.age;
+}
+
+function moveBody(body, dx, dy) {
+  // жёсткое движение: всё тело сдвигается на одну клетку, форма сохраняется
+  const targets = [];
+  for (const i of body.cells) {
+    const x = (i % COLS) + dx, y = ((i / COLS) | 0) + dy;
+    if (x<0||x>=COLS||y<0||y>=ROWS) return false;
+    const t = idx(x,y);
+    if (state[t] !== 0 && owner[t] !== body.id) return false;
+    targets.push(t);
+  }
+  const newFoot = [];
+  for (const t of body.foot) {
+    const x = (t % COLS) + dx, y = ((t / COLS) | 0) + dy;
+    if (x<0||x>=COLS||y<0||y>=ROWS) return false;
+    newFoot.push(idx(x,y));
+  }
+  for (const i of body.cells) { state[i] = 0; owner[i] = 0; }
+  for (const t of targets) { state[t] = 1; owner[t] = body.id; }
+  body.cells = targets; body.foot = newFoot; body.ox += dx; body.oy += dy;
+  stats.moves++;
+  return true;
+}
+
+// ---------- мутация ----------
+function mutateGenome(pg, wasPred) {
+  const m = params.mutation, g = {};
+  for (const k of GENES) g[k] = pg[k];
+  for (const k of Object.keys(DRIFT)) {
+    const [lo,hi] = RANGE[k];
+    g[k] = clamp(pg[k] + (Math.random()*2-1)*DRIFT[k]*m, lo, hi);
+  }
+  for (const k of ['minN','maxN','broodSize','shapeA','shapeB']) {
+    const [lo,hi] = RANGE[k];
+    g[k] = clamp(pg[k] + (Math.random() < m*0.45 ? (Math.random()<0.5?-1:1) : 0), lo, hi);
+  }
+  if (Math.random() < m*0.25) g.shapeType = Math.floor(Math.random()*4);
+  g.maxN = Math.max(g.maxN, g.minN + 1);
+  // крупная мутация: ОДИН случайный ген из ВСЕХ перебрасывается целиком (п.1)
+  if (Math.random() < MACRO_MUT_CHANCE) {
+    const k = GENES[Math.floor(Math.random()*GENES.length)];
+    const [lo,hi] = RANGE[k];
+    g[k] = DISCRETE.includes(k) ? lo + Math.floor(Math.random()*(hi-lo+1)) : lo + Math.random()*(hi-lo);
+    g.maxN = Math.max(g.maxN, g.minN + 1);
+  }
+  g.__endow = 0;
+  // Многоклеточность — тоже K-стратегия, и по той же причине, что и хищничество:
+  // тело это вложение, которому нужно время окупиться. Без этого пакета линия,
+  // впервые построившая тело, вымирает от старости раньше, чем успевает заместиться
+  // (проверено прямым опытом: с коротким lifespan — ноль тел к 1000-му часу,
+  // с длинным — рост с 40 подсаженных до 121 тела и 78 дифференцированных к 2000-му).
+  const tplSize = templateOf(g.shapeType, g.shapeA, g.shapeB).length;
+  const parentTpl = templateOf(pg.shapeType, pg.shapeA, pg.shapeB).length;
+  // пакет срабатывает при ЛЮБОМ увеличении плана, а не только при первом выходе
+  // из одноклеточности: сердцевина появляется лишь с 3x3, и переход 2x2 -> 3x3
+  // нуждается в амортизации ровно так же, как самый первый шаг к телу
+  if (tplSize > parentTpl) {
+    g.lifespan = Math.max(g.lifespan, 800 + tplSize*180 + Math.random()*600);
+  }
+  if (guildOfGenome(g) === 'pred' && !wasPred) {
+    g.lifespan = Math.max(g.lifespan, 1800 + Math.random()*3200);
+    g.moveSpeed = Math.max(g.moveSpeed, 0.65 + Math.random()*0.3);
+    g.broodSize = Math.max(g.broodSize, 2);
+    g.__endow = Math.max(g.__endow, 14);   // хватит, чтобы дойти до добычи и один раз поохотиться
+  }
+  // тот же принцип для многоклеточности: линия, впервые строящая тело, должна
+  // успеть его построить — иначе одноклеточные потомки всегда обгоняют её по размножению
+  return g;
+}
+
+function founderGenome() {
+  return {
+    metab: 0.22+Math.random()*0.32, effic: 0.85+Math.random()*0.3,
+    thresh: 7+Math.random()*7, costFrac: 0.35+Math.random()*0.2,
+    minN: Math.floor(Math.random()*2), maxN: 3+Math.floor(Math.random()*5),
+    aggression: 0.02+Math.random()*0.06, armor: 0.02+Math.random()*0.06,
+    photo: 0.55+Math.random()*0.35, herb: 0.02+Math.random()*0.06, sapro: 0.02+Math.random()*0.06,
+    cycleHours: 14+Math.random()*14, moveSpeed: 0.4+Math.random()*0.4,
+    lifespan: 280+Math.random()*350, broodSize: 1,
+    shapeType: 0, shapeA: 1, shapeB: 1,          // основатель одноклеточный
+  };
+}
+
+function decayCorpses() {
+  for (let i=0;i<N;i++) if (state[i]===2) {
+    corpseFood[i] -= 0.0025;
+    if (corpseFood[i] <= 0.001) { state[i]=0; corpseFood[i]=0; }
+  }
+}
+
+function processSpores() {
+  for (const b of bodies.values()) if (b.guild === 'sapro') {
+    for (const i of b.cells) {
+      sporeDensity[i] = Math.min(SPORE_CAP, sporeDensity[i] + SPORE_DEPOSIT);
+      const x=i%COLS, y=(i/COLS)|0;
+      for (const [dx,dy] of noff) { const nx=x+dx, ny=y+dy;
+        if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS) sporeDensity[idx(nx,ny)] = Math.min(SPORE_CAP, sporeDensity[idx(nx,ny)]+SPORE_DEPOSIT*0.4); }
+    }
+  }
+  for (let i=0;i<N;i++) {
+    if (sporeDensity[i] <= 0) continue;
+    sporeDensity[i] *= SPORE_DECAY;
+    if (state[i]===2 && sporeDensity[i] > SPORE_THRESHOLD && Math.random() < GERMINATE_CHANCE) {
+      const x=i%COLS, y=(i/COLS)|0;
+      const empt = [];
+      for (const [dx,dy] of noff) { const nx=x+dx, ny=y+dy;
+        if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===0) empt.push([nx,ny]); }
+      if (empt.length) {
+        const [gx,gy] = empt[Math.floor(Math.random()*empt.length)];
+        const g = founderGenome();
+        g.photo = 0.02+Math.random()*0.06; g.sapro = 0.55+Math.random()*0.35;
+        g.cycleHours = 48+Math.random()*100; g.lifespan = 1500+Math.random()*2500;
+        if (tryPlaceBody(g, nextLineageId++, gx, gy, 5)) { sporeDensity[i]=0; stats.germ++; }
+      }
+    }
+  }
+}
+
+function step() {
+  const hourOfDay = hours % 24;
+  if (params.dayNight) dayFactor = (hourOfDay>=6 && hourOfDay<=18) ? Math.sin((hourOfDay-6)/12*Math.PI) : 0.15;
+  else dayFactor = 1;
+  phaseX += 0.00006; phaseY += 0.00004;
+  // плодородие дрейфует на 0.00006/час — ежечасный пересчёт 4232 клеток впустую
+  if (hours % 8 === 0) computeFertility();
+  decayCorpses();
+  processSpores();
+
+  order.length = 0;
+  for (const b of bodies.values()) order.push(b);
+  for (let i=order.length-1;i>0;i--) { const j=Math.floor(Math.random()*(i+1)); const t=order[i]; order[i]=order[j]; order[j]=t; }
+
+  for (const body of order) {
+    if (!bodies.has(body.id)) continue;
+    const g = body.g;
+    body.age++;
+    if (body.cooldown > 0) body.cooldown--;
+    if (body.age > g.lifespan) { stats.dAge++; killBody(body); continue; }   // смерть тела целиком по возрасту
+
+    const size = body.cells.length;
+    let interiorCount = 0;
+    const borderCells = [];  // маркер снимается в конце обработки тела
+    // граница считается ОДИН раз за час на тело: раньше isBorder вызывался повторно
+    // ещё и в цикле дохода — лишний обход восьми соседей на каждую клетку каждый час
+    for (const i of body.cells) { if (isBorder(body, i)) { borderCells.push(i); borderMark[i] = 1; } else interiorCount++; }
+    const differentiated = interiorCount > 0;   // дифференцировка возможна только если есть сердцевина
+    const interiorFrac = size ? interiorCount / size : 0;
+
+    // ---- доход ----
+    let income = 0;
+    if (body.guild === 'photo') {
+      for (const i of body.cells) {
+        const y = (i/COLS)|0;
+        const synth = !differentiated ? 1 : (borderMark[i] ? BORDER_SYNTH : INTERIOR_SYNTH);
+        income += g.photo * vGrad[y] * dayFactor * PHOTO_GAIN * fertility[i] * synth;
+      }
+    }
+    body.energy += income;
+
+    // ---- апкип ----
+    const guildIsHetero = body.guild !== 'photo';
+    const senescence = 0.4 / Math.max(200, g.lifespan);
+    const nicheSum = g.photo + g.herb + g.aggression + g.sapro;
+    const dom = Math.max(g.photo, g.herb, g.aggression, g.sapro);
+    let crowd = 0;
+    for (const i of borderCells) { const x=i%COLS, y=(i/COLS)|0;
+      for (const [dx,dy] of noff) { const nx=x+dx, ny=y+dy;
+        if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===1 && owner[idx(nx,ny)]!==body.id) crowd++; } }
+    const moveTax = (body.guild==='herb'||body.guild==='pred') ? g.moveSpeed*0.03*size : 0;
+    const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
+                 + crowd*0.02 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax;
+    { const k = (body.foot.length>1 && size>=body.foot.length) ? acct.multi : (body.foot.length===1 ? acct.uni : null);
+      if (k) { k.h++; k.cells += size; k.inc += income; k.upk += upkeep; } }
+    body.energy -= upkeep;
+    if (body.energy <= 0) { for(const i of borderCells) borderMark[i]=0; stats.dStarve++; killBody(body); continue; } // смерть тела целиком: общий пул исчерпан
+
+    // ---- питание гетеротрофов: добывает барьер, перерабатывает сердцевина ----
+    let ate = false, moved = false;
+    if (body.guild !== 'photo') {
+      const processing = 1 + INTERIOR_PROCESS * interiorFrac;
+      const preyPred = ni => state[ni]===1 && owner[ni]!==body.id && bodies.has(owner[ni]) &&
+                             (bodies.get(owner[ni]).guild==='herb' || bodies.get(owner[ni]).guild==='pred');
+      const preyHerb = ni => state[ni]===1 && owner[ni]!==body.id && bodies.has(owner[ni]) && bodies.get(owner[ni]).guild==='photo';
+      const wantCorpse = ni => state[ni]===2;
+
+      let targets = [];
+      const pick = body.guild==='pred' ? preyPred : body.guild==='herb' ? preyHerb : wantCorpse;
+      for (const i of borderCells) { const x=i%COLS, y=(i/COLS)|0;
+        for (const [dx,dy] of noff2) { const nx=x+dx, ny=y+dy;
+          if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+          const ni = idx(nx,ny); if (pick(ni)) targets.push(ni); } }
+
+      const bites = Math.min(borderCells.length, 4);
+      if (targets.length) {
+        const tgt = targets[Math.floor(Math.random()*targets.length)];
+        if (body.guild === 'pred' && params.predation) {
+          if (Math.random() < 1-Math.pow(1-g.aggression*0.65, bites)) {
+            const victim = bodies.get(owner[tgt]);
+            if (victim) {
+              body.energy -= (0.3 + g.aggression*0.6);
+              const vSize = victim.cells.length;
+              const vBorder = isBorder(victim, tgt);
+              const vDiff = victim.cells.length >= 9 && victim.cells.some(c => !isBorder(victim, c));
+              const effArmor = victim.g.armor + (vDiff && vBorder ? BORDER_ARMOR_BONUS : 0);
+              const atk = (body.energy/size) * (0.6+g.aggression*1.15) * (0.8+Math.random()*0.5);
+              const def = (victim.energy/vSize) * (0.5+effArmor) * (0.75+Math.random()*0.5);
+              if (atk > def) {
+                // барьер пробит -> тело гибнет целиком (п.4)
+                body.energy += (victim.energy*0.6 + vSize*RELEASE[victim.guild]*0.6) * g.effic * processing;
+                stats.dPred++; killBody(victim, 0.4); stats.eaten++; stats.fedBy[body.guild]++; ate = true;
+              }
+            }
+          }
+        } else if (body.guild === 'herb') {
+          if (Math.random() < 1-Math.pow(1-g.herb*0.45, bites)) {
+            const victim = bodies.get(owner[tgt]);
+            if (victim) {
+              const drain = Math.min(victim.energy*0.4, g.herb*2.6*Math.sqrt(size));
+              victim.energy -= drain;
+              body.energy += drain*0.8*g.effic*processing - 0.12;
+              stats.eaten++; stats.fedBy[body.guild]++; ate = true;
+              if (victim.energy <= 0) { stats.dPred++; killBody(victim); }
+            }
+          }
+        } else if (body.guild === 'sapro') {
+          if (Math.random() < 1-Math.pow(1-g.sapro*0.55, bites)) {
+            const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*8*Math.sqrt(size));
+            corpseFood[tgt] -= drain;
+            body.energy += drain*0.85*g.effic*processing;
+            if (corpseFood[tgt] <= 0.001) { state[tgt]=0; corpseFood[tgt]=0; }
+            stats.fedBy[body.guild]++; ate = true;
+          }
+        }
+      } else if (body.guild==='herb' || body.guild==='pred') {
+        // добычи рядом нет — жёсткое движение всем телом к ближайшей
+        const seek = body.guild==='pred' ? preyPred : preyHerb;
+        const hx = body.cells[0]%COLS, hy = (body.cells[0]/COLS)|0;
+        let found = null;
+        for (const [dx,dy,] of senseOffsets) { const nx=hx+dx, ny=hy+dy;
+          if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+          if (seek(idx(nx,ny))) { found = [dx,dy]; break; } }
+        let sx, sy;
+        if (found) { sx = Math.sign(found[0]); sy = Math.sign(found[1]); }
+        else {
+          // добычи не видно — поисковое блуждание с инерцией курса.
+          // без этого организм с пустым радиусом восприятия стоял на месте и голодал
+          if (body.hx === undefined || Math.random() < 0.12) {
+            const d = noff[Math.floor(Math.random()*noff.length)];
+            body.hx = d[0]; body.hy = d[1];
+          }
+          sx = body.hx; sy = body.hy;
+        }
+        if (moveBody(body, sx, sy)) {
+          body.energy -= MOVE_COST*(0.7+g.moveSpeed*0.6)*size;  // цена шага пропорциональна размеру
+          moved = true;
+        } else if (!found) { body.hx = undefined; }
+      }
+    }
+    for (const i of borderCells) borderMark[i] = 0;   // снимаем маркер: доход уже посчитан
+    if (!bodies.has(body.id)) continue;
+    if (body.energy <= 0) { killBody(body); continue; }
+    if (moved) continue;
+
+    // ---- рост шаблона, затем размножение ----
+    const interiorDiscount = Math.min(0.30, interiorCount*0.04);
+    const perChildCost = g.thresh * g.costFrac * (1 - interiorDiscount);
+    const growCost = perChildCost * GROWTH_COST_FRAC;
+
+    // достраиваем форму: следующая свободная клетка шаблона (порядок — от центра наружу)
+    let slot = -1;
+    if (size < body.foot.length) {
+      for (const t of body.foot) {
+        if (state[t]!==0) continue;
+        if (!adjacentToBody(body, t)) continue;   // тело обязано оставаться связным
+        slot = t; break;
+      }
+    }
+    if (slot >= 0) {
+      // рост не ждёт кулдауна: это не размножение, а достройка собственного тела
+      if (body.energy >= growCost + g.thresh*0.35) {
+        state[slot]=1; owner[slot]=body.id; body.cells.push(slot);
+        body.energy -= growCost; stats.grow++;
+      }
+      continue;
+    }
+    // slot < 0 — форма достроена ЛИБО оставшиеся клетки шаблона заняты чужими
+    // (тупик: без этого такое тело осталось бы стерильным навсегда)
+
+    // форма достроена -> деление даёт отдельный организм
+    if (body.cooldown > 0) continue;
+    // Якорь потомка нельзя брать вплотную к родителю: контур ребёнка центрируется на
+    // якоре, поэтому у крупного плана он накрыл бы клетки самого родителя (забронированные)
+    // и размещение отклонялось бы всегда. Зазор считается по ФАКТИЧЕСКОМУ размеру ребёнка:
+    // для тела 4x4 контур идёт от -1 до +2 от якоря, значит зазора в полширины родителя мало.
+    let pcx=0, pcy=0;
+    for (const i of body.cells) { pcx += i%COLS; pcy += (i/COLS)|0; }
+    pcx = Math.round(pcx/size); pcy = Math.round(pcy/size);
+    let pw = 1, ph = 1;
+    for (const [dx,dy] of body.tpl) { pw = Math.max(pw, dx+1); ph = Math.max(ph, dy+1); }
+    const pReach = Math.ceil(Math.max(pw,ph)/2);
+
+    function anchorsFor(cTplArr) {
+      let cw = 1, ch = 1;
+      for (const [dx,dy] of cTplArr) { cw = Math.max(cw, dx+1); ch = Math.max(ch, dy+1); }
+      const cReach = Math.ceil(Math.max(cw,ch)/2);
+      const gap = pReach + cReach + 1;
+      const out = [];
+      for (let rad = gap; rad <= gap + 3; rad++) {
+        for (let a = 0; a < 20; a++) {
+          const th = (a/20 + Math.random()/20)*Math.PI*2;
+          const nx = pcx + Math.round(Math.cos(th)*rad), ny = pcy + Math.round(Math.sin(th)*rad);
+          if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+          if (state[idx(nx,ny)]===0) out.push([nx,ny]);
+        }
+        if (out.length >= 12) break;
+      }
+      return out;
+    }
+    const wanted = g.broodSize;
+    let madeAny = false;
+    for (let k=0;k<wanted;k++) {
+      const cg = mutateGenome(g, body.guild==='pred');
+      // крупный потомок стоит родителю пропорционально телу, которое ему предстоит
+      // построить — иначе он стартует с крохами энергии и гибнет, не достроившись
+      const cTplArr = templateOf(cg.shapeType, cg.shapeA, cg.shapeB);
+      const childCost = perChildCost * (1 + 0.35*(cTplArr.length-1));
+      if (body.energy < childCost + g.thresh*0.5) break;
+      const cand = anchorsFor(cTplArr);
+      let child = null;
+      for (const [cx,cy] of cand) {
+        child = tryPlaceBody(cg, body.lineage, cx, cy, Math.max(childCost*0.55, cg.__endow||0));
+        if (child) break;
+      }
+      if (!child) { stats.noSpot++; continue; }
+      body.energy -= childCost; madeAny = true;
+      const k = (body.foot.length>1) ? acct.multi : acct.uni; k.kids++;
+    }
+    if (madeAny) body.cooldown = g.cycleHours;
+  }
+  hours++;
+}
+
+function reset(colonies=24) {
+  state.fill(0); owner.fill(0); corpseFood.fill(0); sporeDensity.fill(0);
+  bodies.clear(); nextBodyId=1; nextLineageId=1; hours=0;
+  stats = freshStats();
+  for (let y=0;y<ROWS;y++) vGrad[y] = 1 - (y/(ROWS-1))*0.68;
+  phaseX = Math.random()*10; phaseY = Math.random()*10;
+  computeFertility();
+  let placed=0, guard=0;
+  while (placed<colonies && guard<colonies*60) {
+    guard++;
+    const x = Math.floor(Math.random()*COLS), y = Math.floor(Math.random()*ROWS);
+    if (state[idx(x,y)]===0 && tryPlaceBody(founderGenome(), nextLineageId++, x, y, 9+Math.random()*4)) placed++;
+  }
+}
+
+function snapshot() {
+  const gc = {photo:0,herb:0,pred:0,sapro:0};
+  let cells=0, multi=0, maxSize=0, shapes={0:0,1:0,2:0,3:0}, effSum=0, diff=0;
+  for (const b of bodies.values()) {
+    gc[b.guild]++; cells += b.cells.length; effSum += b.g.effic;
+    if (b.cells.length>1) multi++;
+    if (b.cells.some(c=>!isBorder(b,c))) diff++;
+    maxSize = Math.max(maxSize, b.cells.length);
+    shapes[b.g.shapeType]++;
+  }
+  let corpses=0; for (let i=0;i<N;i++) if (state[i]===2) corpses++;
+  let doneCnt=0; for (const b of bodies.values()) if (b.cells.length>=b.foot.length) doneCnt++;
+  return { hours, org: bodies.size, cells, corpses, ...gc, multi, diff, maxSize, done: doneCnt,
+           effic: bodies.size? (effSum/bodies.size).toFixed(2):'-', shapes };
+}
+
+module.exports = { reset, step, snapshot, stats, params, bodies, templateOf, tryPlaceBody, founderGenome,
+  get acct(){ return acct; }, acctReset,
+  get hours(){ return hours; } };
+
+if (require.main === module) {
+  const HOURS = parseInt(process.argv[2]||'20000',10);
+  reset(24);
+  const marks = new Set([24,168,720,2000,5000,10000,15000,20000,30000,50000].filter(h=>h<=HOURS));
+  console.log('час\tорг\tклет\tтруп\tphoto\therb\tpred\tsapro\tмного\tдифф\tmax\tготов\teffic\tформы');
+  for (let h=0;h<HOURS;h++) {
+    step();
+    if (marks.has(hours)) {
+      const s = snapshot();
+      console.log(`${s.hours}\t${s.org}\t${s.cells}\t${s.corpses}\t${s.photo}\t${s.herb}\t${s.pred}\t${s.sapro}\t${s.multi}\t${s.diff}\t${s.maxSize}\t${s.done}\t${s.effic}\t${JSON.stringify(s.shapes)}`);
+    }
+    if (bodies.size===0) { console.log(`ВЫМИРАНИЕ на часу ${hours}`); break; }
+  }
+  console.log('события:', JSON.stringify({born:stats.born,died:stats.died,eaten:stats.eaten,moves:stats.moves,germ:stats.germ,grow:stats.grow,dStarve:stats.dStarve,dAge:stats.dAge,dPred:stats.dPred,noRoom:stats.noRoom}));
+  console.log('по нишам: ниша | рождено | умерло | ср.жизнь(ч) | удачных кормлений');
+  for (const k of ['photo','herb','pred','sapro']) {
+    const d = stats.diedBy[k] || 0;
+    console.log(`  ${k}\t${stats.bornBy[k]}\t${d}\t${d? (stats.lifeBy[k]/d).toFixed(0):'-'}\t${stats.fedBy[k]}`);
+  }
+}

@@ -100,6 +100,22 @@
 
   .legend{font-size:10.5px; color:var(--ink-dim); line-height:1.55;}
   .legend b{color:var(--ink);}
+
+  .inspector{background:#141b2e;border:1px solid #24304a;border-radius:10px;padding:10px 12px;margin:10px 0;font-size:12px}
+  .insp-empty{color:#8b9ab5;line-height:1.5}
+  .insp-head{font-weight:700;font-size:14px;margin-bottom:2px}
+  .insp-sub{color:#9fb0cc;margin-bottom:8px;line-height:1.5}
+  table.genes,table.generef{width:100%;border-collapse:collapse;margin-top:6px}
+  table.genes th,table.generef th{text-align:left;font-weight:600;padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;color:#dbe6f7}
+  table.genes td,table.generef td{padding:3px 8px 3px 0;vertical-align:top}
+  .gk{display:block;font-weight:400;font-size:10px;color:#6d7d99;font-family:ui-monospace,Menlo,monospace}
+  .gv{font-family:ui-monospace,Menlo,monospace;color:#58e0c9;white-space:nowrap}
+  .gr{font-family:ui-monospace,Menlo,monospace;color:#8b9ab5;white-space:nowrap}
+  .gd{color:#9fb0cc;line-height:1.45}
+  .gbarw{width:66px}
+  .gbar{height:5px;background:#222d45;border-radius:3px;overflow:hidden}
+  .gbar i{display:block;height:100%;background:#58e0c9}
+  @media(max-width:560px){ .gbarw{display:none} .gd{font-size:11px} }
 </style>
 </head>
 <body>
@@ -119,6 +135,7 @@
     <canvas id="dish" width="368" height="736"></canvas>
   </div>
 
+  <div class="inspector" id="inspector"></div>
   <div class="swatchlegend" id="swatchLegend">
     <div class="sw"><span class="chip" style="background:hsl(142,70%,45%)"></span>фототроф</div>
     <div class="sw"><span class="chip" style="background:hsl(46,70%,50%)"></span>травоядное</div>
@@ -175,8 +192,9 @@
       <div class="stat"><span class="k">Схваток / выпасов</span><span class="v" id="sFights">0</span></div>
       <div class="stat"><span class="k">Перемещений</span><span class="v" id="sMoves">0</span></div>
       <div class="stat"><span class="k">Прорастаний спор</span><span class="v" id="sSpores">0</span></div>
-      <div class="stat"><span class="k">Тел (колоний)</span><span class="v" id="sBodies">0</span></div>
+      <div class="stat"><span class="k">Многоклеточных</span><span class="v" id="sBodies">0</span></div>
       <div class="stat"><span class="k">Крупнейшее тело</span><span class="v" id="sMaxBody">0</span></div>
+      <div class="stat"><span class="k">Дифференцировано</span><span class="v" id="sDiff">0</span></div>
       <div class="stat wide"><span class="k">Освещённость</span><span class="v" id="sLight">–</span></div>
       <div class="stat wide">
         <span class="k">Трофическая пирамида</span>
@@ -203,9 +221,17 @@
   </div>
 
   <div class="legend">
-    <b>Время теперь настоящее.</b> Один такт движка = один виртуальный час биологии. Сутки — строго 24 часа: свет по синусоиде с 6:00 до 18:00, ночью — только фоновая засветка (сумерки/луна). Ползунок скорости — часы виртуального времени в минуту реального: от 1 (почти реальное время) до 100 000 (быстрая перемотка на годы вперёд за секунды), логарифмическая шкала.<br><br>
-    Ориентиры реализма (порядок величины, не точное соответствие виду): <b>фототроф</b> делится раз в ~14–28 часов и живёт ~250–600 часов (~1.5–3 недели) — как фитопланктон. <b>Травоядное</b> при рождении наследует быстрый «водорослевый» цикл от предка-фототрофа и дальше само эволюционирует к более медленному темпу. <b>Хищник</b> — исключение: в момент, когда линия впервые становится хищником, она сразу получает коррелированный пакет «живёт дольше, двигается быстрее, больше потомков за помёт» — в реальной экологии хищники почти всегда K-стратеги, и это свойство появляется вместе с самим хищничеством, а не отдельным медленным дрейфом на протяжении сотен поколений. <b>Сапротроф</b> размножается медленнее (~48–150 часов) и живёт по 1500–4000 часов (несколько месяцев), как грибница. Скорость движения намеренно не привязана к реальным км/ч — у сетки нет единиц расстояния.<br><br>
-    <b>Многоклеточность.</b> Отдельный мутирующий признак «когезия» определяет, остаётся ли потомок физически прикреплён к родителю (общее тело) или отпочковывается независимой клеткой. <b>Тело всегда однородно по типу</b>: если мутация увела потомка в другую нишу (например, из фототрофа в травоядное), он не может остаться в теле родителя, даже при высокой когезии — отпочковывается как отдельный организм. Тела размером от двух клеток обведены тонкой белой линией по внешнему контуру — видно, где заканчивается один организм и начинается пустое место, труп или чужое тело. Клетки одного тела делят энергию между собой каждый час — затенённая клетка внутри тела больше не гибнет от голода в одиночку, пока сосед по телу сыт. Окраинные клетки (мало соседей своего тела) получают надбавку к защите при атаке хищника — колонию физически труднее доесть целиком. Внутренние клетки (много соседей своего тела) делятся дешевле — простое разделение труда без отдельной «программы развития». Плата — небольшой налог на координацию с каждым соседом по телу и локальный предохранитель: в клетке, уже плотно окружённой своими (6+ соседей того же тела), когезия временно не срабатывает — иначе одно тело со временем заняло бы всю чашку.
+    <b>Время настоящее.</b> Один такт движка = один виртуальный час. Сутки строго 24 часа: свет по синусоиде с 6:00 до 18:00, ночью только фоновая засветка. Ползунок скорости — виртуальные часы в минуту реального времени, от 1 до 100 000, шкала логарифмическая.<br><br>
+    <b>Единица жизни — организм, а не клетка.</b> У тела единый пул энергии, единый возраст и общая судьба: оно гибнет целиком — от старости, от исчерпания пула или когда хищник пробивает барьер. Отдельная клетка внутри тела больше не умирает сама по себе.<br><br>
+    <b>Форма задана генетически</b> — квадрат, прямоугольник, круг или овал, с размерами по генам «размер А» и «размер Б». План это намерение, а не бронь: тело строит из него то, что успевает занять, и живёт недостроенным, если соседи забрали часть места. Достраивается всегда от центра наружу и только вплотную к уже построенному, поэтому организм остаётся связным. Тела от двух клеток обведены белым контуром. Одноклеточность — не отдельный случай, а вырожденный: план 1×1.<br><br>
+    <b>Специализация клеток по положению, а не по геному.</b> Барьерная клетка (есть ортогональный сосед не из своего тела) синтезирует хуже — ×0.75, но даёт телу +0.45 к защите. Внутренняя синтезирует много лучше — ×3.0, и удешевляет деление, но беззащитна: до неё просто не дотянуться снаружи. Барьерные клетки нарисованы темнее. Дифференцировка включается только там, где сердцевина реально появилась: у мелкого тела внутренних клеток нет, и все его клетки обычные. Отсюда и выгода размера — чем крупнее тело, тем больше доля сердцевины.<br><br>
+    <b>Клик по организму открывает его геном</b> — все 18 генов со значением, положением в диапазоне и расшифровкой, на что каждый влияет. Клик по пустой клетке подсаживает нового фототрофа.<br><br>
+    <b>Что во что складывается.</b> Единственный изначальный источник энергии — свет, при сбросе заселяются только фототрофы. Травоядные, хищники и сапротрофы обязаны возникнуть мутацией сами. Ниша не хранится отдельным полем: она вычисляется как наибольший из четырёх пищевых генов, поэтому линия может со временем перетечь из одной ниши в другую.
+  </div>
+
+  <div class="legend">
+    <b>Полный геном — 18 наследуемых генов.</b> Все до одного дрейфуют у потомка, и любой может быть целиком переброшен крупной мутацией. Ниша — не ген, а следствие: наибольший из первых четырёх.
+    <table class="generef" id="geneRef"></table>
   </div>
 
 </div>
@@ -217,47 +243,26 @@
   canvas.width = COLS*CELL; canvas.height = ROWS*CELL;
   const ctx = canvas.getContext('2d');
   const N = COLS*ROWS;
+  const idx = (x,y)=> y*COLS+x;
+  const clamp = (v,a,b)=> Math.max(a,Math.min(b,v));
 
-  let state = new Uint8Array(N);
-  let energy = new Float32Array(N);
+  // ─── Сетка. Единица симуляции — ТЕЛО (организм), а не клетка: клеточные массивы
+  //     хранят только то, что относится к месту, а не к существу.
+  let state = new Uint8Array(N);        // 0 пусто, 1 живая клетка, 2 труп
+  let owner = new Int32Array(N);        // id тела, которому принадлежит клетка (0 = ничьё)
   let corpseFood = new Float32Array(N);
   let sporeDensity = new Float32Array(N);
   let fertility = new Float32Array(N);
-  let metab = new Float32Array(N);
-  let effic = new Float32Array(N);
-  let thresh = new Float32Array(N);
-  let costFrac = new Float32Array(N);
-  let minN = new Uint8Array(N);
-  let maxN = new Uint8Array(N);
-  let aggression = new Float32Array(N);
-  let armor = new Float32Array(N);
-  let photo = new Float32Array(N);
-  let herb = new Float32Array(N);
-  let sapro = new Float32Array(N);
-  let cycleHours = new Float32Array(N);   // часы между делениями
-  let cooldown = new Float32Array(N);     // осталось часов до следующего возможного деления
-  let moveSpeed = new Float32Array(N);
-  let lifespan = new Float32Array(N);     // личный предел возраста, в часах
-  let broodSize = new Uint8Array(N);
-  let age = new Float32Array(N);          // возраст в часах
-  let lineage = new Int32Array(N).fill(-1);
-  let bodyId = new Int32Array(N).fill(-1); // физическая привязка к телу (не путать с lineage — родословной)
-  let cohesion = new Float32Array(N);      // склонность оставаться прикреплённым к родителю при делении
-  let nextBodyId = 1;
-  let cellBodySize = new Int32Array(N);    // кэш размера тела для клетки (для отрисовки границы)
-
   let vGrad = new Float32Array(ROWS);
 
-  let hours = 0, nextLineageId = 1, extinctCount = 0, actionCount = 0, moveCount = 0, sporeGermCount = 0;
-  let popHistory = [];
-  let knownLineages = new Set();
-  let lineageHueJitter = {};
-  let flashes = [];
-  let allExtinctNotified = false;
-  let phaseX = 0, phaseY = 0;
-  let dayFactor = 1;
-  let guildsEverSeen = new Set();
-  let running = false;
+  let bodies = new Map();               // id -> организм (см. tryPlaceBody)
+  let nextBodyId = 1, nextLineageId = 1;
+
+  let hours = 0, extinctCount = 0, actionCount = 0, moveCount = 0, sporeGermCount = 0;
+  let popHistory = [], knownLineages = new Set(), lineageHueJitter = {};
+  let flashes = [], allExtinctNotified = false;
+  let phaseX = 0, phaseY = 0, dayFactor = 1;
+  let guildsEverSeen = new Set(), running = false, selectedBody = null;
 
   const params = { hoursPerMinute:24, mutation:0.12, decomp:0.3, predation:true, dayNight:true };
 
@@ -265,200 +270,508 @@
   const RELEASE = { photo:2.2, herb:2.8, pred:4.2, sapro:1.8 };
   const SPORE_CAP = 1.0, SPORE_DEPOSIT = 0.06, SPORE_DECAY = 0.996, SPORE_THRESHOLD = 0.25, GERMINATE_CHANCE = 0.02;
 
-  const idx = (x,y)=> y*COLS+x;
-  const clamp = (v,a,b)=> Math.max(a,Math.min(b,v));
+  // ─── Специализация клеток по положению в теле. Это НЕ ген: барьерная клетка —
+  //     просто та, у которой есть ортогональный сосед не из своего тела. Так же
+  //     работает дифференцировка в реальной биологии — по положению, не по геному.
+  const BORDER_SYNTH = 0.75;      // барьерная хуже синтезирует
+  const INTERIOR_SYNTH = 3.00;    // внутренняя лучше
+  const BORDER_ARMOR_BONUS = 0.45;// барьерная лучше защищает
+  const INTERIOR_PROCESS = 0.35;  // внутренние перерабатывают добытое барьером
+  const GROWTH_COST_FRAC = 0.20;  // вырастить свою клетку много дешевле, чем снарядить потомка
+  const AGE_SCALE = Math.sqrt;    // старение растёт с размером тела, но не линейно
+
+  // ─── СПРАВОЧНИК ГЕНОВА. Единый источник правды: из него строятся и таблица на
+  //     странице, и инспектор по клику. Диапазоны здесь обязаны совпадать с RANGE.
+  const GENE_INFO = [
+    ['photo',      'фотосинтез',      0,1,      'Доход от света: photo × освещённость × 3.0 × плодородие. Наибольший из четырёх пищевых генов задаёт нишу.'],
+    ['herb',       'травоядность',    0,1,      'Шанс укуса фототрофа (herb × 0.45 на клетку барьера) и объём высасываемого (до herb × 2.6).'],
+    ['aggression', 'хищность',        0,1,      'Шанс атаки (× 0.65) и сила удара (0.6 + aggression × 1.15). Хищники едят и травоядных, и друг друга.'],
+    ['sapro',      'сапротрофия',     0,1,      'Шанс поедания трупа (sapro × 0.55) и объём (sapro × скорость разложения × 8).'],
+    ['armor',      'броня',           0,1,      'Защита в бою (0.5 + armor). Барьерные клетки тела получают надбавку +0.45. Стоит 0.03 апкипа на клетку.'],
+    ['effic',      'усвоение пищи',   0.3,1.6,  'Множитель на всё, что получено из еды. Только для гетеротрофов: у фототрофа эту роль играет сам ген photo. Стоит 0.05 апкипа на клетку.'],
+    ['metab',      'обмен веществ',   0.15,1.7, 'Базовый расход энергии на каждую клетку тела каждый час.'],
+    ['lifespan',   'предел жизни',    100,12000,'Возраст в часах, после которого тело гибнет целиком. Он же знаменатель старения: 0.4 / max(200, lifespan).'],
+    ['cycleHours', 'цикл деления',    4,1200,   'Часы между помётами. Таймер, а не вероятность: так отбор не штрафует быстрое деление косвенно.'],
+    ['broodSize',  'потомков за раз', 1,4,      'Сколько независимых зачатков выбрасывается за один помёт.'],
+    ['moveSpeed',  'подвижность',     0.15,1,   'Только у травоядных и хищников. Цена шага 0.16 × (0.7 + moveSpeed × 0.6) × размер тела.'],
+    ['thresh',     'порог деления',   4,40,     'Энергия, ниже которой размножение невозможно.'],
+    ['costFrac',   'вклад в потомка', 0.2,0.9,  'Какая доля порога уходит в зачаток. Крупный план стоит дороже пропорционально числу клеток.'],
+    ['minN',       'мин. соседей',    0,4,      'Нижняя граница числа чужих живых соседей, при которой тело вообще делится.'],
+    ['maxN',       'макс. соседей',   1,8,      'Верхняя граница того же. Вместе с minN задаёт предпочитаемую плотность.'],
+    ['shapeType',  'тип формы',       0,3,      'План тела: 0 квадрат, 1 прямоугольник, 2 круг, 3 овал. План — намерение: тело строит из него то, что успело занять.'],
+    ['shapeA',     'размер А',        1,5,      'Сторона квадрата, ширина прямоугольника, радиус круга, большая полуось овала.'],
+    ['shapeB',     'размер Б',        1,5,      'Высота прямоугольника и малая полуось овала. У квадрата и круга не используется.'],
+  ];
+  const GENES = GENE_INFO.map(g=>g[0]);
+  const RANGE = {}; GENE_INFO.forEach(g=> RANGE[g[0]] = [g[2],g[3]]);
+  const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
+                  photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150 };
+  const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
+  const SHAPE_NAMES = ['квадрат','прямоугольник','круг','овал'];
+
+  // ─── Геометрия
+  const noff = [];  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) if(dx||dy) noff.push([dx,dy]);
+  const noff2 = []; for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++) if(dx||dy) noff2.push([dx,dy]);
+  const noff4 = [[0,-1],[0,1],[-1,0],[1,0]];
+  const senseOffsets = [];
+  for(let dy=-6;dy<=6;dy++) for(let dx=-6;dx<=6;dx++){
+    if(!dx && !dy) continue; const d = Math.hypot(dx,dy); if(d<=6) senseOffsets.push([dx,dy,d]);
+  }
+  senseOffsets.sort((a,b)=>a[2]-b[2]);
+
+  const tplCache = new Map();
+  function templateOf(type,a,b){
+    if(type >= 2){ a = Math.min(a,3); b = Math.min(b,3); }   // круг/овал ограничены жёстче: диаметр 2a-1
+    const key = type+':'+a+':'+b;
+    if(tplCache.has(key)) return tplCache.get(key);
+    let cells = [];
+    if(type===0){ for(let y=0;y<a;y++) for(let x=0;x<a;x++) cells.push([x,y]); }
+    else if(type===1){ for(let y=0;y<b;y++) for(let x=0;x<a;x++) cells.push([x,y]); }
+    else if(type===2){ const r=a-0.5, d=2*a-1, c=a-1;
+      for(let y=0;y<d;y++) for(let x=0;x<d;x++) if((x-c)*(x-c)+(y-c)*(y-c) <= r*r+0.01) cells.push([x,y]); }
+    else { const w=2*a-1, h=2*b-1, cx=a-1, cy=b-1;
+      for(let y=0;y<h;y++) for(let x=0;x<w;x++)
+        if(((x-cx)*(x-cx))/((a-0.5)*(a-0.5)) + ((y-cy)*(y-cy))/((b-0.5)*(b-0.5)) <= 1.01) cells.push([x,y]); }
+    const mnx = Math.min(...cells.map(c=>c[0])), mny = Math.min(...cells.map(c=>c[1]));
+    cells = cells.map(c=>[c[0]-mnx, c[1]-mny]);
+    const cx = Math.max(...cells.map(c=>c[0]))/2, cy = Math.max(...cells.map(c=>c[1]))/2;
+    cells.sort((p,q)=> ((p[0]-cx)**2+(p[1]-cy)**2) - ((q[0]-cx)**2+(q[1]-cy)**2)); // от центра наружу
+    tplCache.set(key, cells);
+    return cells;
+  }
 
   function computeFertility(){
     for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
-      const i = idx(x,y);
       const n = 0.5 + 0.5*Math.sin(x*0.16+phaseX)*Math.cos(y*0.11+phaseY) + 0.2*Math.sin((x+y)*0.07+phaseX*0.5);
-      fertility[i] = Math.max(0.45, Math.min(1.15, 0.7 + 0.45*n));
+      fertility[idx(x,y)] = clamp(0.7 + 0.45*n, 0.45, 1.15);
     }
   }
 
-  const noff = [];
-  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) if(dx||dy) noff.push([dx,dy]);
-  function neighborsOf(x,y){
-    const list = [];
+  function guildOfGenome(g){
+    let best='photo', bv=g.photo;
+    if(g.herb>bv){ best='herb'; bv=g.herb; }
+    if(g.aggression>bv){ best='pred'; bv=g.aggression; }
+    if(g.sapro>bv){ best='sapro'; bv=g.sapro; }
+    return best;
+  }
+  function guildLabel(g){ return {photo:'фототроф',herb:'травоядное',pred:'хищник',sapro:'сапротроф'}[g]||g; }
+
+  function adjacentToBody(body, t){
+    const x=t%COLS, y=(t/COLS)|0;
     for(const [dx,dy] of noff){
-      const nx=x+dx, ny=y+dy;
-      if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS) list.push(idx(nx,ny));
-    }
-    return list;
-  }
-
-  const noff2 = [];
-  for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++) if(dx||dy) noff2.push([dx,dy]);
-  function wideNeighborsOf(x,y){
-    const list = [];
-    for(const [dx,dy] of noff2){
-      const nx=x+dx, ny=y+dy;
-      if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS) list.push(idx(nx,ny));
-    }
-    return list;
-  }
-
-  const senseOffsets = [];
-  for(let dy=-6;dy<=6;dy++) for(let dx=-6;dx<=6;dx++){
-    if(!dx && !dy) continue;
-    const d = Math.hypot(dx,dy);
-    if(d<=6) senseOffsets.push([dx,dy,d]);
-  }
-  senseOffsets.sort((a,b)=>a[2]-b[2]);
-  function findNearest(x,y,predicate){
-    for(const [dx,dy] of senseOffsets){
       const nx=x+dx, ny=y+dy;
       if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
       const ni = idx(nx,ny);
-      if(predicate(ni)) return {dx,dy};
+      if(state[ni]===1 && owner[ni]===body.id) return true;
     }
-    return null;
+    return false;
   }
-  function bestStepTowards(candidates, tx, ty){
-    let best=null, bestD=Infinity;
-    for(const c of candidates){
-      const cx = c % COLS, cy = Math.floor(c / COLS);
-      const d = (cx-tx)*(cx-tx) + (cy-ty)*(cy-ty);
-      if(d < bestD){ bestD = d; best = c; }
+  // Барьерная — та, у которой есть ОРТОГОНАЛЬНЫЙ сосед не из своего тела. По всем
+  // восьми проверять нельзя: формы рваные, и клетки, окружённой своими со всех
+  // восьми сторон, не бывает даже в теле из 11 — дифференцировка не включалась бы.
+  function isBorder(body, i){
+    const x=i%COLS, y=(i/COLS)|0;
+    for(const [dx,dy] of noff4){
+      const nx=x+dx, ny=y+dy;
+      if(nx<0||nx>=COLS||ny<0||ny>=ROWS) return true;
+      const ni = idx(nx,ny);
+      if(owner[ni]!==body.id || state[ni]!==1) return true;
     }
-    return best;
-  }
-  function moveOrganism(from, to){
-    state[to]=1; energy[to]=energy[from];
-    metab[to]=metab[from]; effic[to]=effic[from]; thresh[to]=thresh[from]; costFrac[to]=costFrac[from];
-    minN[to]=minN[from]; maxN[to]=maxN[from];
-    aggression[to]=aggression[from]; armor[to]=armor[from];
-    photo[to]=photo[from]; herb[to]=herb[from]; sapro[to]=sapro[from];
-    cycleHours[to]=cycleHours[from]; cooldown[to]=cooldown[from]; moveSpeed[to]=moveSpeed[from];
-    lifespan[to]=lifespan[from]; broodSize[to]=broodSize[from];
-    cohesion[to]=cohesion[from]; bodyId[to]=bodyId[from];
-    age[to]=age[from]; lineage[to]=lineage[from];
-    state[from]=0; energy[from]=0;
+    return false;
   }
 
-  function seedPhotoFounder(i){
-    metab[i] = 0.22 + Math.random()*0.32;
-    effic[i] = 0.6 + Math.random()*1.0;
-    minN[i] = Math.floor(Math.random()*2);
-    maxN[i] = 3 + Math.floor(Math.random()*5);
-    aggression[i]=0.02+Math.random()*0.06; armor[i]=0.02+Math.random()*0.06;
-    herb[i]=0.02+Math.random()*0.06; sapro[i]=0.02+Math.random()*0.06;
-    photo[i] = 0.55+Math.random()*0.35;
-    thresh[i] = 7+Math.random()*7;
-    costFrac[i] = 0.35+Math.random()*0.2;
-    cycleHours[i] = 14+Math.random()*14;      // ~14-28 часов между делениями — как фитопланктон
-    moveSpeed[i] = 0.4+Math.random()*0.4;
-    lifespan[i] = 280+Math.random()*350;      // ~250-600 часов жизни
-    broodSize[i] = 1;
-    cooldown[i] = cycleHours[i];
-    age[i]=0;
-    cohesion[i] = 0.05+Math.random()*0.1;
-    bodyId[i] = nextBodyId++;
+  function tryPlaceBody(g, lineage, ax, ay, energy){
+    const tpl = templateOf(g.shapeType, g.shapeA, g.shapeB);
+    const [sdx,sdy] = tpl[0];
+    const ox = ax - sdx, oy = ay - sdy;
+    const w = Math.max(...tpl.map(c=>c[0]))+1, h = Math.max(...tpl.map(c=>c[1]))+1;
+    if(ox<0 || oy<0 || ox+w>COLS || oy+h>ROWS) return null;
+    const i0 = idx(ax,ay);
+    if(state[i0] !== 0) return null;
+    // План формы — НАМЕРЕНИЕ, а не бронь: тело строит из него то, что успеет занять,
+    // и живёт недостроенным. Требовать весь контур свободным нельзя — в решётке,
+    // забитой одноклеточными, такого места не находится, и многоклеточность тогда
+    // не возникает вовсе (проверено: вспышка на 2000-м часу и ноль к 10000-му).
+    const foot = [];
+    for(const [dx,dy] of tpl) foot.push(idx(ox+dx, oy+dy));
+    const id = nextBodyId++;
+    const body = { id, g, lineage, guild: guildOfGenome(g), ox, oy, tpl, foot,
+                   cells:[i0], energy, age:0, cooldown:g.cycleHours };
+    state[i0]=1; owner[i0]=id;
+    const want = Math.min(foot.length, 1 + Math.floor(foot.length/3));  // зачаток — сразу комок
+    for(let k=0;k<foot.length && body.cells.length<want;k++){
+      const t = foot[k];
+      if(state[t]===0 && adjacentToBody(body,t)){ state[t]=1; owner[t]=id; body.cells.push(t); }
+    }
+    bodies.set(id, body);
+    if(!knownLineages.has(lineage)){ knownLineages.add(lineage); lineageHueJitter[lineage] = (Math.random()*36-18); }
+    return body;
   }
 
-  function seedSaproSpore(i){
-    metab[i] = 0.22+Math.random()*0.32; effic[i]=0.6+Math.random()*1.0;
-    minN[i] = Math.floor(Math.random()*2); maxN[i] = 3+Math.floor(Math.random()*5);
-    aggression[i]=0.02+Math.random()*0.06; armor[i]=0.02+Math.random()*0.06;
-    herb[i]=0.02+Math.random()*0.06; photo[i]=0.02+Math.random()*0.06;
-    sapro[i] = 0.55+Math.random()*0.35;
-    thresh[i] = 8+Math.random()*8; costFrac[i] = 0.3+Math.random()*0.2;
-    cycleHours[i] = 48+Math.random()*100;     // ~2-6 суток на распространение
-    moveSpeed[i] = 0.4+Math.random()*0.4;
-    lifespan[i] = 1500+Math.random()*2500;    // ~2-6 месяцев, как мицелий
-    broodSize[i]=1;
-    cooldown[i]=cycleHours[i];
-    age[i]=0;
-    cohesion[i] = 0.05+Math.random()*0.1;
-    bodyId[i] = nextBodyId++;
+  function killBody(body, corpseFrac){
+    const rel = RELEASE[body.guild] * (corpseFrac===undefined ? 1 : corpseFrac);
+    for(const i of body.cells){
+      if(rel > 0.001){ state[i]=2; corpseFood[i]=rel; } else state[i]=0;
+      owner[i]=0;
+    }
+    if(selectedBody === body.id) selectedBody = null;
+    bodies.delete(body.id);
   }
 
-  function spawnFounder(i, e){
-    state[i]=1; energy[i]=e;
-    seedPhotoFounder(i);
-    lineage[i] = nextLineageId;
-    lineageHueJitter[nextLineageId] = (Math.random()*2-1)*18;
-    knownLineages.add(nextLineageId);
-    nextLineageId++;
+  function moveBody(body, dx, dy){
+    const targets = [];
+    for(const i of body.cells){
+      const x=(i%COLS)+dx, y=((i/COLS)|0)+dy;
+      if(x<0||x>=COLS||y<0||y>=ROWS) return false;
+      const t = idx(x,y);
+      if(state[t]!==0 && owner[t]!==body.id) return false;
+      targets.push(t);
+    }
+    const newFoot = [];
+    for(const t of body.foot){
+      const x=(t%COLS)+dx, y=((t/COLS)|0)+dy;
+      if(x<0||x>=COLS||y<0||y>=ROWS) return false;
+      newFoot.push(idx(x,y));
+    }
+    for(const i of body.cells){ state[i]=0; owner[i]=0; }
+    for(const t of targets){ state[t]=1; owner[t]=body.id; }
+    body.cells = targets; body.foot = newFoot; body.ox += dx; body.oy += dy;
+    moveCount++;
+    return true;
   }
 
-  function germinateSapro(i){
-    state[i]=1; energy[i]=5+Math.random()*3;
-    seedSaproSpore(i);
-    lineage[i] = nextLineageId;
-    lineageHueJitter[nextLineageId] = (Math.random()*2-1)*18;
-    knownLineages.add(nextLineageId);
-    nextLineageId++;
-  }
-
-  function guildLabel(g){ return {photo:'фототроф',herb:'травоядное',pred:'хищник',sapro:'сапротроф'}[g]||g; }
-
-  function mutateChild(pi, ci){
-    const wasPred = guildOf(pi) === 'pred';
-    const m = params.mutation;
-    metab[ci] = clamp(metab[pi] + (Math.random()*2-1)*0.5*m, 0.15, 1.7);
-    effic[ci] = clamp(effic[pi] + (Math.random()*2-1)*1.0*m, 0.3, 3.4);
-    thresh[ci] = clamp(thresh[pi] + (Math.random()*2-1)*7*m, 4, 40);
-    costFrac[ci] = clamp(costFrac[pi] + (Math.random()*2-1)*0.28*m, 0.2, 0.9);
-    minN[ci] = clamp(minN[pi] + (Math.random()<m*0.5 ? (Math.random()<0.5?-1:1):0), 0, 4);
-    maxN[ci] = clamp(maxN[pi] + (Math.random()<m*0.5 ? (Math.random()<0.5?-1:1):0), minN[ci]+1, 8);
-    aggression[ci] = clamp(aggression[pi] + (Math.random()*2-1)*0.25*m, 0, 1);
-    armor[ci] = clamp(armor[pi] + (Math.random()*2-1)*0.25*m, 0, 1);
-    photo[ci] = clamp(photo[pi] + (Math.random()*2-1)*0.25*m, 0, 1);
-    herb[ci] = clamp(herb[pi] + (Math.random()*2-1)*0.25*m, 0, 1);
-    sapro[ci] = clamp(sapro[pi] + (Math.random()*2-1)*0.25*m, 0, 1);
-    cycleHours[ci] = clamp(cycleHours[pi] + (Math.random()*2-1)*20*m, 4, 1200);
-    moveSpeed[ci] = clamp(moveSpeed[pi] + (Math.random()*2-1)*0.3*m, 0.15, 1);
-    lifespan[ci] = clamp(lifespan[pi] + (Math.random()*2-1)*150*m, 100, 12000);
-    broodSize[ci] = clamp(broodSize[pi] + (Math.random()<m*0.4 ? (Math.random()<0.5?-1:1):0), 1, 4);
-    cohesion[ci] = clamp(cohesion[pi] + (Math.random()*2-1)*0.3*m, 0, 1);
-
+  function mutateGenome(pg, wasPred){
+    const m = params.mutation, g = {};
+    for(const k of GENES) g[k] = pg[k];
+    for(const k of Object.keys(DRIFT)){
+      const [lo,hi] = RANGE[k];
+      g[k] = clamp(pg[k] + (Math.random()*2-1)*DRIFT[k]*m, lo, hi);
+    }
+    for(const k of ['minN','maxN','broodSize','shapeA','shapeB']){
+      const [lo,hi] = RANGE[k];
+      g[k] = clamp(pg[k] + (Math.random() < m*0.45 ? (Math.random()<0.5?-1:1) : 0), lo, hi);
+    }
+    if(Math.random() < m*0.25) g.shapeType = Math.floor(Math.random()*4);
+    g.maxN = Math.max(g.maxN, g.minN+1);
+    // Крупная мутация перебрасывает ОДИН случайный ген из ВСЕХ восемнадцати.
+    // Раньше список был из девяти: экономические гены дрейфовали, но прыгнуть не могли.
     if(Math.random() < MACRO_MUT_CHANCE){
-      const pick = Math.floor(Math.random()*9);
-      if(pick===0) aggression[ci]=Math.random();
-      else if(pick===1) armor[ci]=Math.random();
-      else if(pick===2) photo[ci]=Math.random();
-      else if(pick===3) herb[ci]=Math.random();
-      else if(pick===4) sapro[ci]=Math.random();
-      else if(pick===5) cycleHours[ci]=4+Math.random()*1196;
-      else if(pick===6) moveSpeed[ci]=0.15+Math.random()*0.85;
-      else if(pick===7) lifespan[ci]=100+Math.random()*11900;
-      else cohesion[ci]=Math.random();
+      const k = GENES[Math.floor(Math.random()*GENES.length)];
+      const [lo,hi] = RANGE[k];
+      g[k] = DISCRETE.includes(k) ? lo + Math.floor(Math.random()*(hi-lo+1)) : lo + Math.random()*(hi-lo);
+      g.maxN = Math.max(g.maxN, g.minN+1);
+    }
+    g.__endow = 0;
+    // Многоклеточность — K-стратегия ровно по той же причине, что и хищничество:
+    // тело это вложение, которому нужно время окупиться. Без пакета линия, впервые
+    // построившая тело, вымирает от старости раньше, чем успевает заместиться
+    // (прямой опыт: с коротким lifespan — ноль тел к 1000-му часу, с длинным —
+    // рост с 40 подсаженных до 121 тела и 78 дифференцированных к 2000-му).
+    const tplSize = templateOf(g.shapeType,g.shapeA,g.shapeB).length;
+    const parentTpl = templateOf(pg.shapeType,pg.shapeA,pg.shapeB).length;
+    if(tplSize > parentTpl) g.lifespan = Math.max(g.lifespan, 800 + tplSize*180 + Math.random()*600);
+    if(guildOfGenome(g)==='pred' && !wasPred){
+      g.lifespan = Math.max(g.lifespan, 1800 + Math.random()*3200);
+      g.moveSpeed = Math.max(g.moveSpeed, 0.65 + Math.random()*0.3);
+      g.broodSize = Math.max(g.broodSize, 2);
+      g.__endow = Math.max(g.__endow, 14);   // хватит дойти до добычи и один раз поохотиться
+    }
+    return g;
+  }
+
+  function founderGenome(){
+    return {
+      metab: 0.22+Math.random()*0.32, effic: 0.85+Math.random()*0.3,
+      thresh: 7+Math.random()*7, costFrac: 0.35+Math.random()*0.2,
+      minN: Math.floor(Math.random()*2), maxN: 3+Math.floor(Math.random()*5),
+      aggression: 0.02+Math.random()*0.06, armor: 0.02+Math.random()*0.06,
+      photo: 0.55+Math.random()*0.35, herb: 0.02+Math.random()*0.06, sapro: 0.02+Math.random()*0.06,
+      cycleHours: 14+Math.random()*14, moveSpeed: 0.4+Math.random()*0.4,
+      lifespan: 280+Math.random()*350, broodSize: 1,
+      shapeType: 0, shapeA: 1, shapeB: 1,      // основатель одноклеточный
+    };
+  }
+  function spawnFounder(i, e){
+    return tryPlaceBody(founderGenome(), nextLineageId++, i%COLS, (i/COLS)|0, e);
+  }
+
+  function decayCorpses(){
+    for(let i=0;i<N;i++) if(state[i]===2){
+      corpseFood[i] -= 0.0025;
+      if(corpseFood[i] <= 0.001){ state[i]=0; corpseFood[i]=0; }
+    }
+  }
+
+  function processSpores(){
+    for(const b of bodies.values()) if(b.guild==='sapro'){
+      for(const i of b.cells){
+        sporeDensity[i] = Math.min(SPORE_CAP, sporeDensity[i]+SPORE_DEPOSIT);
+        const x=i%COLS, y=(i/COLS)|0;
+        for(const [dx,dy] of noff){ const nx=x+dx, ny=y+dy;
+          if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS){ const ni=idx(nx,ny);
+            sporeDensity[ni] = Math.min(SPORE_CAP, sporeDensity[ni]+SPORE_DEPOSIT*0.4); } }
+      }
+    }
+    for(let i=0;i<N;i++){
+      if(sporeDensity[i] <= 0) continue;
+      sporeDensity[i] *= SPORE_DECAY;
+      if(state[i]===2 && sporeDensity[i] > SPORE_THRESHOLD && Math.random() < GERMINATE_CHANCE){
+        const x=i%COLS, y=(i/COLS)|0, empt=[];
+        for(const [dx,dy] of noff){ const nx=x+dx, ny=y+dy;
+          if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===0) empt.push([nx,ny]); }
+        if(empt.length){
+          const [gx,gy] = empt[Math.floor(Math.random()*empt.length)];
+          const g = founderGenome();
+          g.photo = 0.02+Math.random()*0.06; g.sapro = 0.55+Math.random()*0.35;
+          g.cycleHours = 48+Math.random()*100; g.lifespan = 1500+Math.random()*2500;
+          if(tryPlaceBody(g, nextLineageId++, gx, gy, 5)){ sporeDensity[i]=0; sporeGermCount++; }
+        }
+      }
+    }
+  }
+
+  const order = [];
+  function step(){
+    const hourOfDay = hours % 24;
+    dayFactor = params.dayNight
+      ? ((hourOfDay>=6 && hourOfDay<=18) ? Math.sin((hourOfDay-6)/12*Math.PI) : 0.15)
+      : 1;
+    phaseX += 0.00006; phaseY += 0.00004;
+    if(hours % 8 === 0) computeFertility();   // дрейф 0.00006/час — ежечасный пересчёт впустую
+    decayCorpses();
+    processSpores();
+
+    order.length = 0;
+    for(const b of bodies.values()) order.push(b);
+    for(let i=order.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=order[i]; order[i]=order[j]; order[j]=t; }
+
+    for(const body of order){
+      if(!bodies.has(body.id)) continue;
+      const g = body.g;
+      body.age++;
+      if(body.cooldown > 0) body.cooldown--;
+      if(body.age > g.lifespan){ killBody(body); continue; }      // гибнет ЦЕЛИКОМ по возрасту
+
+      const size = body.cells.length;
+      let interiorCount = 0;
+      const borderCells = [];
+      for(const i of body.cells){ if(isBorder(body,i)) borderCells.push(i); else interiorCount++; }
+      const differentiated = interiorCount > 0;   // дифференцировка только там, где есть сердцевина
+      const interiorFrac = size ? interiorCount/size : 0;
+
+      let income = 0;
+      if(body.guild === 'photo'){
+        for(const i of body.cells){
+          const y = (i/COLS)|0;
+          const synth = !differentiated ? 1 : (isBorder(body,i) ? BORDER_SYNTH : INTERIOR_SYNTH);
+          income += g.photo * vGrad[y] * dayFactor * PHOTO_GAIN * fertility[i] * synth;
+        }
+      }
+      body.energy += income;
+
+      const guildIsHetero = body.guild !== 'photo';
+      const senescence = 0.4/Math.max(200, g.lifespan);
+      const nicheSum = g.photo+g.herb+g.aggression+g.sapro;
+      const dom = Math.max(g.photo,g.herb,g.aggression,g.sapro);
+      let crowd = 0;
+      for(const i of borderCells){ const x=i%COLS, y=(i/COLS)|0;
+        for(const [dx,dy] of noff){ const nx=x+dx, ny=y+dy;
+          if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS){ const ni=idx(nx,ny);
+            if(state[ni]===1 && owner[ni]!==body.id) crowd++; } } }
+      const moveTax = guildIsHetero && body.guild!=='sapro' ? g.moveSpeed*0.03*size : 0;
+      const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
+                   + crowd*0.02 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax;
+      body.energy -= upkeep;
+      if(body.energy <= 0){ killBody(body); continue; }           // гибнет ЦЕЛИКОМ: общий пул исчерпан
+
+      let moved = false;
+      if(guildIsHetero){
+        const processing = 1 + INTERIOR_PROCESS*interiorFrac;
+        const bites = Math.min(borderCells.length, 4);   // кормится каждая барьерная клетка
+        const isPrey = ni => state[ni]===1 && owner[ni]!==body.id && bodies.has(owner[ni]);
+        const preyPred = ni => isPrey(ni) && (bodies.get(owner[ni]).guild==='herb' || bodies.get(owner[ni]).guild==='pred');
+        const preyHerb = ni => isPrey(ni) && bodies.get(owner[ni]).guild==='photo';
+        const wantCorpse = ni => state[ni]===2;
+        const pick = body.guild==='pred' ? preyPred : body.guild==='herb' ? preyHerb : wantCorpse;
+
+        const targets = [];
+        for(const i of borderCells){ const x=i%COLS, y=(i/COLS)|0;
+          for(const [dx,dy] of noff2){ const nx=x+dx, ny=y+dy;
+            if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+            const ni = idx(nx,ny); if(pick(ni)) targets.push(ni); } }
+
+        if(targets.length){
+          const tgt = targets[Math.floor(Math.random()*targets.length)];
+          if(body.guild==='pred' && params.predation){
+            if(Math.random() < 1-Math.pow(1-g.aggression*0.65, bites)){
+              const victim = bodies.get(owner[tgt]);
+              if(victim){
+                body.energy -= (0.3 + g.aggression*0.6);
+                const vSize = victim.cells.length;
+                const vDiff = victim.cells.some(c=>!isBorder(victim,c));
+                const effArmor = victim.g.armor + (vDiff && isBorder(victim,tgt) ? BORDER_ARMOR_BONUS : 0);
+                const atk = (body.energy/size)*(0.6+g.aggression*1.15)*(0.8+Math.random()*0.5);
+                const def = (victim.energy/vSize)*(0.5+effArmor)*(0.75+Math.random()*0.5);
+                if(atk > def){
+                  // барьер пробит -> тело жертвы гибнет целиком; хищник съедает и биомассу,
+                  // поэтому от съеденного остаётся неполный труп (иначе вещество считалось бы дважды)
+                  const vGuild = victim.guild, vLid = victim.lineage;
+                  body.energy += (victim.energy*0.6 + vSize*RELEASE[vGuild]*0.6)*g.effic*processing;
+                  flashes.push({i:tgt, life:6});
+                  killBody(victim, 0.4);
+                  actionCount++;
+                  if(Math.random() < 0.12){
+                    logEvent('fight', vGuild==='pred'
+                      ? `хищник #${body.lineage} загрыз хищника #${vLid} (каннибализм)`
+                      : `хищник #${body.lineage} поймал травоядное #${vLid}`);
+                  }
+                }
+              }
+            }
+          } else if(body.guild==='herb'){
+            if(Math.random() < 1-Math.pow(1-g.herb*0.45, bites)){
+              const victim = bodies.get(owner[tgt]);
+              if(victim){
+                const drain = Math.min(victim.energy*0.4, g.herb*2.6*Math.sqrt(size));
+                victim.energy -= drain;
+                body.energy += drain*0.8*g.effic*processing - 0.12;
+                actionCount++;
+                if(victim.energy <= 0){
+                  const vLid = victim.lineage;
+                  flashes.push({i:tgt, life:5});
+                  killBody(victim);
+                  if(Math.random() < 0.1) logEvent('graze', `травоядное #${body.lineage} доело фототроф #${vLid}`);
+                }
+              }
+            }
+          } else if(body.guild==='sapro'){
+            if(Math.random() < 1-Math.pow(1-g.sapro*0.55, bites)){
+              const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*8*Math.sqrt(size));
+              corpseFood[tgt] -= drain;
+              body.energy += drain*0.85*g.effic*processing;
+              actionCount++;
+              if(corpseFood[tgt] <= 0.001){
+                state[tgt]=0; corpseFood[tgt]=0;
+                if(Math.random() < 0.08) logEvent('graze', `сапротроф #${body.lineage} доразложил труп`);
+              }
+            }
+          }
+        } else if(body.guild==='herb' || body.guild==='pred'){
+          // жёсткое движение ВСЕМ телом: форма сохраняется, цена пропорциональна размеру
+          const seek = body.guild==='pred' ? preyPred : preyHerb;
+          const hx = body.cells[0]%COLS, hy = (body.cells[0]/COLS)|0;
+          let found = null;
+          for(const [dx,dy] of senseOffsets){ const nx=hx+dx, ny=hy+dy;
+            if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+            if(seek(idx(nx,ny))){ found=[dx,dy]; break; } }
+          let sx, sy;
+          if(found){ sx=Math.sign(found[0]); sy=Math.sign(found[1]); }
+          else {
+            // добычи не видно — поисковое блуждание с инерцией курса. Без него организм
+            // с пустым радиусом восприятия стоял на месте и голодал (хищник жил 4 часа).
+            if(body.hx===undefined || Math.random()<0.12){
+              const d = noff[Math.floor(Math.random()*noff.length)];
+              body.hx=d[0]; body.hy=d[1];
+            }
+            sx=body.hx; sy=body.hy;
+          }
+          if(moveBody(body, sx, sy)){
+            body.energy -= MOVE_COST*(0.7+g.moveSpeed*0.6)*size;
+            moved = true;
+          } else if(!found) body.hx = undefined;
+        }
+      }
+
+      if(!bodies.has(body.id)) continue;
+      if(body.energy <= 0){ killBody(body); continue; }
+      if(moved) continue;
+
+      const interiorDiscount = Math.min(0.30, interiorCount*0.04);
+      const perChildCost = g.thresh * g.costFrac * (1-interiorDiscount);
+      const growCost = perChildCost * GROWTH_COST_FRAC;
+
+      // рост идёт вперёд размножения и не ждёт кулдауна: это достройка себя, не потомство
+      let slot = -1;
+      if(size < body.foot.length){
+        for(const t of body.foot){
+          if(state[t]!==0) continue;
+          if(!adjacentToBody(body,t)) continue;   // тело обязано оставаться связным
+          slot = t; break;
+        }
+      }
+      if(slot >= 0){
+        if(body.energy >= growCost + g.thresh*0.35){
+          state[slot]=1; owner[slot]=body.id; body.cells.push(slot);
+          body.energy -= growCost;
+        }
+        continue;
+      }
+      // слотов нет: форма достроена ЛИБО остаток занят чужими — размножаемся
+      if(body.cooldown > 0) continue;
+      if(crowd < g.minN || crowd > g.maxN*Math.max(1,size)) continue;
+
+      let pcx=0, pcy=0;
+      for(const i of body.cells){ pcx += i%COLS; pcy += (i/COLS)|0; }
+      pcx = Math.round(pcx/size); pcy = Math.round(pcy/size);
+      let pw=1, ph=1;
+      for(const [dx,dy] of body.tpl){ pw=Math.max(pw,dx+1); ph=Math.max(ph,dy+1); }
+      const pReach = Math.ceil(Math.max(pw,ph)/2);
+
+      let madeAny = false;
+      for(let k=0;k<g.broodSize;k++){
+        const cg = mutateGenome(g, body.guild==='pred');
+        const cTplArr = templateOf(cg.shapeType, cg.shapeA, cg.shapeB);
+        // крупный потомок стоит родителю пропорционально телу, которое ему предстоит
+        // построить, иначе он стартует с крохами энергии и гибнет недостроенным
+        const childCost = perChildCost * (1 + 0.35*(cTplArr.length-1));
+        if(body.energy < childCost + g.thresh*0.5) break;
+        // Якорь нельзя брать вплотную к родителю: контур ребёнка центрируется на якоре,
+        // и у крупного плана он накрыл бы клетки самого родителя. Зазор считается по
+        // размеру РЕБЁНКА: для тела 4x4 контур идёт от -1 до +2 от якоря.
+        let cw=1, ch=1;
+        for(const [dx,dy] of cTplArr){ cw=Math.max(cw,dx+1); ch=Math.max(ch,dy+1); }
+        const gap = pReach + Math.ceil(Math.max(cw,ch)/2) + 1;
+        let child = null;
+        for(let rad=gap; rad<=gap+3 && !child; rad++){
+          for(let a=0;a<20 && !child;a++){
+            const th = (a/20 + Math.random()/20)*Math.PI*2;
+            const nx = pcx + Math.round(Math.cos(th)*rad), ny = pcy + Math.round(Math.sin(th)*rad);
+            if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+            if(state[idx(nx,ny)]!==0) continue;
+            child = tryPlaceBody(cg, body.lineage, nx, ny, Math.max(childCost*0.55, cg.__endow||0));
+          }
+        }
+        if(!child) continue;
+        body.energy -= childCost;
+        madeAny = true;
+      }
+      if(madeAny) body.cooldown = g.cycleHours;
     }
 
-    cooldown[ci] = cycleHours[ci];
-    age[ci] = 0;
-    lineage[ci] = lineage[pi];
-
-    // хищник — почти всегда K-стратег: как только линия впервые становится хищником,
-    // она сразу получает коррелированную жизненную стратегию (дольше жизнь, быстрее движение,
-    // больше потомков за помёт), а не ждёт сотни поколений постепенного дрейфа
-    if(guildOf(ci) === 'pred' && !wasPred){
-      lifespan[ci] = Math.max(lifespan[ci], 1800 + Math.random()*3200);
-      moveSpeed[ci] = Math.max(moveSpeed[ci], 0.65 + Math.random()*0.3);
-      broodSize[ci] = Math.max(broodSize[ci], 2);
-      energy[ci] = Math.max(energy[ci], 6);
+    hours++;
+    if(hours % 3 === 0){
+      let pop = 0; for(const b of bodies.values()) pop += b.cells.length;
+      popHistory.push(pop);
+      if(popHistory.length > 160) popHistory.shift();
+      if(pop===0 && !allExtinctNotified){ allExtinctNotified = true; showToast('Вся жизнь в чашке вымерла'); }
+      else if(pop>0) allExtinctNotified = false;
     }
+    if(hours % 10 === 0) checkExtinctions();
+  }
 
-    // привязка потомка к телу родителя: с вероятностью cohesion остаётся физически
-    // прикреплённым (общий bodyId), иначе отпочковывается как новое независимое тело.
-    // локальный предохранитель от неограниченного разрастания одного тела: в клетке,
-    // уже плотно окружённой своими (>=6 соседей того же тела), когезия не срабатывает
-    const px = pi % COLS, py = Math.floor(pi / COLS);
-    let sameBodyAtBirth = 0;
-    for(const nb of neighborsOf(px,py)) if(state[nb]===1 && bodyId[nb]===bodyId[pi]) sameBodyAtBirth++;
-    // тело растёт только клетками одного типа: если мутация увела потомка в другую
-    // нишу, он не может остаться в теле родителя — даже при высокой когезии
-    const sameGuildAsParent = guildOf(ci) === guildOf(pi);
-    const cohesionChance = (sameBodyAtBirth >= 6 || !sameGuildAsParent) ? 0 : cohesion[ci];
-    bodyId[ci] = (Math.random() < cohesionChance) ? bodyId[pi] : nextBodyId++;
+  function checkExtinctions(){
+    const present = new Set();
+    for(const b of bodies.values()) present.add(b.lineage);
+    const gone = [];
+    for(const lid of knownLineages) if(!present.has(lid)){ knownLineages.delete(lid); extinctCount++; gone.push(lid); }
+    if(gone.length===1) logEvent('die', `Колония #${gone[0]} вымерла`);
+    else if(gone.length>1) logEvent('die', `Вымерло линий: ${gone.length}`);
   }
 
   function logEvent(kind, text){
     const el = document.getElementById('log');
     const row = document.createElement('div');
-    row.className = kind;
-    row.textContent = text;
+    row.className = kind; row.textContent = text;
     el.prepend(row);
     while(el.children.length > 24) el.removeChild(el.lastChild);
   }
@@ -473,305 +786,37 @@
   }
 
   function reset(){
-    state.fill(0); energy.fill(0); corpseFood.fill(0); sporeDensity.fill(0);
-    metab.fill(0); effic.fill(0); thresh.fill(0); costFrac.fill(0); minN.fill(0); maxN.fill(0);
-    aggression.fill(0); armor.fill(0); photo.fill(0); herb.fill(0); sapro.fill(0);
-    cycleHours.fill(0); cooldown.fill(0); moveSpeed.fill(0); lifespan.fill(0); broodSize.fill(1);
-    age.fill(0); lineage.fill(-1);
+    state.fill(0); owner.fill(0); corpseFood.fill(0); sporeDensity.fill(0);
+    bodies.clear(); nextBodyId = 1; nextLineageId = 1; selectedBody = null;
     for(let y=0;y<ROWS;y++) vGrad[y] = 1 - (y/(ROWS-1))*0.68;
     phaseX = Math.random()*10; phaseY = Math.random()*10;
     computeFertility();
     document.getElementById('log').innerHTML = '';
-    knownLineages = new Set(); lineageHueJitter = {}; nextLineageId = 1; extinctCount = 0; actionCount = 0; moveCount = 0; sporeGermCount = 0;
+    knownLineages = new Set(); lineageHueJitter = {};
+    extinctCount = 0; actionCount = 0; moveCount = 0; sporeGermCount = 0;
     flashes = []; allExtinctNotified = false; hours = 0; guildsEverSeen = new Set(['photo']);
     const initColonies = parseInt(document.getElementById('initColonies').value,10) || 24;
-    let placed = 0, guard = 0;
-    while(placed < initColonies && guard < initColonies*60){
+    let placed=0, guard=0;
+    while(placed<initColonies && guard<initColonies*60){
       guard++;
       const i = Math.floor(Math.random()*N);
-      if(state[i]===0){ spawnFounder(i, 9+Math.random()*4); placed++; }
+      if(state[i]===0 && spawnFounder(i, 9+Math.random()*4)) placed++;
     }
     logEvent('birth', `Заселено ${placed} фототрофов (день 1, 00:00)`);
     popHistory = [];
-    updateClock();
-    updateStats();
-    render();
+    updateClock(); updateStats(); render(); renderInspector();
   }
 
   const guildBaseHue = {photo:142, herb:46, pred:350, sapro:268};
-  function guildOf(i){
-    let best='photo', bv=photo[i];
-    if(herb[i]>bv){best='herb'; bv=herb[i];}
-    if(aggression[i]>bv){best='pred'; bv=aggression[i];}
-    if(sapro[i]>bv){best='sapro'; bv=sapro[i];}
-    return best;
-  }
-
-  function killCell(i, guild){
-    state[i] = 2;
-    corpseFood[i] = RELEASE[guild];
-    energy[i] = 0;
-  }
-
-  function decayCorpses(){
-    for(let i=0;i<N;i++){
-      if(state[i]===2){
-        corpseFood[i] -= 0.0025;
-        if(corpseFood[i] <= 0){ state[i]=0; corpseFood[i]=0; }
-      }
-    }
-  }
-
-  function processSpores(){
-    for(let i=0;i<N;i++){
-      if(state[i]===1 && guildOf(i)==='sapro'){
-        const x=i%COLS, y=Math.floor(i/COLS);
-        sporeDensity[i] = Math.min(SPORE_CAP, sporeDensity[i]+SPORE_DEPOSIT);
-        for(const nb of neighborsOf(x,y)) sporeDensity[nb] = Math.min(SPORE_CAP, sporeDensity[nb]+SPORE_DEPOSIT*0.35);
-      }
-    }
-    for(let i=0;i<N;i++){
-      sporeDensity[i] *= SPORE_DECAY;
-      if(state[i]===2 && corpseFood[i]>0.05 && sporeDensity[i]>SPORE_THRESHOLD){
-        const x=i%COLS, y=Math.floor(i/COLS);
-        const emptyNbs = neighborsOf(x,y).filter(nb=>state[nb]===0);
-        if(emptyNbs.length && Math.random()<GERMINATE_CHANCE){
-          const spot = emptyNbs[Math.floor(Math.random()*emptyNbs.length)];
-          germinateSapro(spot);
-          sporeDensity[i] *= 0.5;
-          sporeGermCount++;
-          if(Math.random()<0.3) logEvent('graze', `споры проросли новым сапротрофом #${lineage[spot]} у трупа`);
-        }
-      }
-    }
-  }
-
-  function shareBodyEnergy(rate){
-    const newEnergy = energy.slice();
-    for(let i=0;i<N;i++){
-      if(state[i]!==1) continue;
-      const x=i%COLS, y=Math.floor(i/COLS);
-      let sum=0, cnt=0;
-      for(const nb of neighborsOf(x,y)){
-        if(state[nb]===1 && bodyId[nb]===bodyId[i]){ sum+=energy[nb]; cnt++; }
-      }
-      if(cnt>0){ const avg=sum/cnt; newEnergy[i] = energy[i] + (avg-energy[i])*rate; }
-    }
-    energy = newEnergy;
-  }
-
-  // один вызов step() = один виртуальный час
-  function step(){
-    const hourOfDay = hours % 24;
-    if(params.dayNight){
-      if(hourOfDay>=6 && hourOfDay<=18) dayFactor = Math.sin((hourOfDay-6)/12*Math.PI);
-      else dayFactor = 0.15;
-    } else dayFactor = 1;
-
-    phaseX += 0.00006; phaseY += 0.00004;
-    computeFertility();
-    decayCorpses();
-    processSpores();
-    shareBodyEnergy(0.18);
-
-    const order = [];
-    for(let i=0;i<N;i++) if(state[i]===1) order.push(i);
-    for(let i=order.length-1;i>0;i--){
-      const j = Math.floor(Math.random()*(i+1));
-      [order[i],order[j]] = [order[j],order[i]];
-    }
-
-    for(const i of order){
-      if(state[i] !== 1) continue;
-      age[i]++;
-      if(cooldown[i] > 0) cooldown[i]--;
-      const myGuild = guildOf(i);
-      if(age[i] > lifespan[i]){ killCell(i, myGuild); continue; }
-
-      const x = i % COLS, y = Math.floor(i / COLS);
-      const nbrs = neighborsOf(x,y);
-      let aliveCount = 0;
-      const empties = [];
-      for(const nb of nbrs){
-        if(state[nb]===1) aliveCount++;
-        else if(state[nb]===0) empties.push(nb);
-      }
-
-      if(myGuild === 'photo'){
-        const lightHere = vGrad[y]*dayFactor;
-        energy[i] += photo[i]*lightHere*PHOTO_GAIN*fertility[i];
-      }
-
-      // старение относительно СОБСТВЕННОГО предела жизни, а не абсолютных часов —
-      // долгоживущие линии не наказываются сильнее короткоживущих
-      const senescenceRate = 0.4/Math.max(200, lifespan[i]);
-      const crowd = aliveCount*0.02;
-      const nicheSum = photo[i]+herb[i]+aggression[i]+sapro[i];
-      const dom = Math.max(photo[i], herb[i], aggression[i], sapro[i]);
-      const moveTax = (myGuild==='herb'||myGuild==='pred') ? moveSpeed[i]*0.03 : 0;
-      let sameBodyCount = 0;
-      for(const nb of nbrs) if(state[nb]===1 && bodyId[nb]===bodyId[i]) sameBodyCount++;
-      const bodyTax = sameBodyCount*0.015;
-      const upkeep = metab[i] + age[i]*senescenceRate + crowd + dom*0.10 + (nicheSum-dom)*0.02
-                    + armor[i]*0.03 + moveTax + bodyTax;
-      energy[i] -= upkeep;
-
-      if(energy[i] <= 0){ killCell(i, myGuild); continue; }
-
-      if(myGuild === 'pred' && params.predation){
-        const prey = wideNeighborsOf(x,y).filter(nb => state[nb]===1 && nb!==i && (guildOf(nb)==='herb' || guildOf(nb)==='pred'));
-        if(prey.length){
-          if(Math.random() < aggression[i]*0.65){
-            const target = prey[Math.floor(Math.random()*prey.length)];
-            const targetGuild = guildOf(target);
-            energy[i] -= (0.3 + aggression[i]*0.6);
-            const targetEnergy = energy[target];
-            const tgx = target % COLS, tgy = Math.floor(target / COLS);
-            let targetSameBody = 0;
-            for(const nb of neighborsOf(tgx,tgy)) if(state[nb]===1 && bodyId[nb]===bodyId[target]) targetSameBody++;
-            const edgeBonus = targetSameBody*cohesion[target]*0.05;
-            const attackPower = energy[i] * (0.6+aggression[i]*1.15) * (0.8+Math.random()*0.5);
-            const defendPower = targetEnergy * (0.5+armor[target]+edgeBonus) * (0.75+Math.random()*0.5);
-            if(attackPower > defendPower){
-              const targetLid = lineage[target];
-              energy[i] += Math.min(5, targetEnergy*0.5);
-              killCell(target, targetGuild);
-              flashes.push({i: target, life: 6});
-              actionCount++;
-              if(Math.random() < 0.12){
-                const msg = targetGuild==='pred'
-                  ? `хищник #${lineage[i]} загрыз хищника #${targetLid} (каннибализм)`
-                  : `хищник #${lineage[i]} поймал травоядное #${targetLid}`;
-                logEvent('fight', msg);
-              }
-            }
-          }
-        } else if(empties.length){
-          const found = findNearest(x,y, ni => state[ni]===1 && (guildOf(ni)==='herb' || guildOf(ni)==='pred'));
-          if(found){
-            const moveTo = bestStepTowards(empties, x+found.dx, y+found.dy);
-            if(moveTo!=null){
-              moveOrganism(i, moveTo);
-              energy[moveTo] -= MOVE_COST*(0.7+moveSpeed[i]*0.6);
-              moveCount++;
-              if(Math.random() < Math.max(0, moveSpeed[i]-0.55)){
-                const x2=moveTo%COLS, y2=Math.floor(moveTo/COLS);
-                const nx=x2+Math.sign(found.dx), ny=y2+Math.sign(found.dy);
-                if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS){
-                  const i2=idx(nx,ny);
-                  if(state[i2]===0){ moveOrganism(moveTo,i2); energy[i2]-=MOVE_COST*0.5; moveCount++; }
-                }
-              }
-              continue;
-            }
-          }
-        }
-      } else if(myGuild === 'herb'){
-        const prey = wideNeighborsOf(x,y).filter(nb => state[nb]===1 && guildOf(nb)==='photo');
-        if(prey.length){
-          if(Math.random() < herb[i]*0.45){
-            const tgt = prey[Math.floor(Math.random()*prey.length)];
-            const drain = Math.min(energy[tgt]*0.4, herb[i]*2.6);
-            energy[tgt] -= drain;
-            energy[i] += drain*0.8;
-            energy[i] -= 0.12;
-            actionCount++;
-            if(energy[tgt] <= 0){
-              const tgtLid = lineage[tgt];
-              killCell(tgt, 'photo');
-              flashes.push({i: tgt, life: 5});
-              if(Math.random() < 0.1) logEvent('graze', `травоядное #${lineage[i]} доело фототроф #${tgtLid}`);
-            }
-          }
-        } else if(empties.length){
-          const found = findNearest(x,y, ni => state[ni]===1 && guildOf(ni)==='photo');
-          if(found){
-            const moveTo = bestStepTowards(empties, x+found.dx, y+found.dy);
-            if(moveTo!=null){
-              moveOrganism(i, moveTo);
-              energy[moveTo] -= MOVE_COST*(0.7+moveSpeed[i]*0.6);
-              moveCount++;
-              if(Math.random() < Math.max(0, moveSpeed[i]-0.55)){
-                const x2=moveTo%COLS, y2=Math.floor(moveTo/COLS);
-                const nx=x2+Math.sign(found.dx), ny=y2+Math.sign(found.dy);
-                if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS){
-                  const i2=idx(nx,ny);
-                  if(state[i2]===0){ moveOrganism(moveTo,i2); energy[i2]-=MOVE_COST*0.5; moveCount++; }
-                }
-              }
-              continue;
-            }
-          }
-        }
-      } else if(myGuild === 'sapro'){
-        const corpsesWide = wideNeighborsOf(x,y).filter(nb => state[nb]===2);
-        if(corpsesWide.length && Math.random() < sapro[i]*0.55){
-          const tgt = corpsesWide[Math.floor(Math.random()*corpsesWide.length)];
-          const drain = Math.min(corpseFood[tgt], sapro[i]*params.decomp*8);
-          corpseFood[tgt] -= drain;
-          energy[i] += drain*0.85;
-          actionCount++;
-          if(corpseFood[tgt] <= 0.001){
-            state[tgt] = 0; corpseFood[tgt] = 0;
-            if(Math.random() < 0.08) logEvent('graze', `сапротроф #${lineage[i]} доразложил труп`);
-          }
-        }
-      }
-
-      if(state[i] !== 1) continue;
-
-      if(cooldown[i] <= 0 && energy[i] >= thresh[i] && empties.length && aliveCount >= minN[i] && aliveCount <= maxN[i]){
-        const wanted = broodSize[i];
-        const pool = empties.slice();
-        const targets = [];
-        while(targets.length < wanted && pool.length){
-          const pick = Math.floor(Math.random()*pool.length);
-          targets.push(pool.splice(pick,1)[0]);
-        }
-        const perChildCost = thresh[i]*costFrac[i]*(1-Math.min(0.24, sameBodyCount*0.03));
-        const totalCost = perChildCost*targets.length;
-        if(targets.length && energy[i] >= totalCost){
-          energy[i] -= totalCost;
-          cooldown[i] = cycleHours[i];
-          for(const tgt of targets){
-            state[tgt] = 1;
-            energy[tgt] = perChildCost*0.55;
-            mutateChild(i, tgt);
-          }
-        }
-      }
-    }
-
-    hours++;
-    if(hours % 3 === 0){
-      let pop = 0;
-      for(let i=0;i<N;i++) if(state[i]===1) pop++;
-      popHistory.push(pop);
-      if(popHistory.length > 160) popHistory.shift();
-      if(pop === 0 && !allExtinctNotified){ allExtinctNotified = true; showToast('Вся жизнь в чашке вымерла'); }
-      else if(pop > 0){ allExtinctNotified = false; }
-    }
-    if(hours % 10 === 0) checkExtinctions();
-  }
-
-  function checkExtinctions(){
-    const present = new Set();
-    for(let i=0;i<N;i++) if(state[i]===1) present.add(lineage[i]);
-    const gone = [];
-    for(const lid of knownLineages){
-      if(!present.has(lid)){ knownLineages.delete(lid); extinctCount++; gone.push(lid); }
-    }
-    if(gone.length === 1){ logEvent('die', `Колония #${gone[0]} вымерла`); }
-    else if(gone.length > 1){ logEvent('die', `Вымерло линий: ${gone.length}`); }
-  }
-
-  function cellColor(i){
-    const g = guildOf(i);
-    const dom = {photo:photo[i],herb:herb[i],pred:aggression[i],sapro:sapro[i]}[g];
-    const jitter = lineageHueJitter[lineage[i]] || 0;
-    const h = (guildBaseHue[g] + jitter + 360) % 360;
+  function cellColor(body, i, borderFlag){
+    const g = body.g;
+    const dom = {photo:g.photo, herb:g.herb, pred:g.aggression, sapro:g.sapro}[body.guild];
+    const jitter = lineageHueJitter[body.lineage] || 0;
+    const h = (guildBaseHue[body.guild] + jitter + 360) % 360;
     const sat = clamp(38+dom*52, 38, 95);
-    const light = clamp(28 + (energy[i]/(thresh[i]*1.3))*42, 26, 76);
+    const perCell = body.energy / Math.max(1, body.cells.length);
+    let light = clamp(28 + (perCell/(g.thresh*1.3))*42, 26, 76);
+    if(borderFlag) light = clamp(light-7, 20, 76);   // барьерные темнее: видно разделение труда
     return `hsl(${h.toFixed(1)}, ${sat}%, ${light}%)`;
   }
 
@@ -779,20 +824,16 @@
     ctx.strokeStyle = 'rgba(255,255,255,0.65)';
     ctx.lineWidth = 1.4;
     ctx.beginPath();
-    for(let y=0;y<ROWS;y++){
-      for(let x=0;x<COLS;x++){
-        const i = idx(x,y);
-        if(state[i]!==1 || cellBodySize[i] <= 1) continue; // граница только у настоящих тел (2+ клетки)
-        const px = x*CELL, py = y*CELL;
-        const b = bodyId[i];
-        const up = y>0 ? idx(x,y-1) : -1;
-        const down = y<ROWS-1 ? idx(x,y+1) : -1;
-        const left = x>0 ? idx(x-1,y) : -1;
-        const right = x<COLS-1 ? idx(x+1,y) : -1;
-        if(up<0 || state[up]!==1 || bodyId[up]!==b){ ctx.moveTo(px, py); ctx.lineTo(px+CELL-1, py); }
-        if(down<0 || state[down]!==1 || bodyId[down]!==b){ ctx.moveTo(px, py+CELL-1); ctx.lineTo(px+CELL-1, py+CELL-1); }
-        if(left<0 || state[left]!==1 || bodyId[left]!==b){ ctx.moveTo(px, py); ctx.lineTo(px, py+CELL-1); }
-        if(right<0 || state[right]!==1 || bodyId[right]!==b){ ctx.moveTo(px+CELL-1, py); ctx.lineTo(px+CELL-1, py+CELL-1); }
+    for(const body of bodies.values()){
+      if(body.cells.length <= 1) continue;   // граница только у настоящих тел (2+ клетки)
+      for(const i of body.cells){
+        const x=i%COLS, y=(i/COLS)|0, px=x*CELL, py=y*CELL, b=body.id;
+        const up = y>0?idx(x,y-1):-1, down = y<ROWS-1?idx(x,y+1):-1;
+        const left = x>0?idx(x-1,y):-1, right = x<COLS-1?idx(x+1,y):-1;
+        if(up<0||owner[up]!==b||state[up]!==1){ ctx.moveTo(px,py); ctx.lineTo(px+CELL-1,py); }
+        if(down<0||owner[down]!==b||state[down]!==1){ ctx.moveTo(px,py+CELL-1); ctx.lineTo(px+CELL-1,py+CELL-1); }
+        if(left<0||owner[left]!==b||state[left]!==1){ ctx.moveTo(px,py); ctx.lineTo(px,py+CELL-1); }
+        if(right<0||owner[right]!==b||state[right]!==1){ ctx.moveTo(px+CELL-1,py); ctx.lineTo(px+CELL-1,py+CELL-1); }
       }
     }
     ctx.stroke();
@@ -800,27 +841,32 @@
 
   function render(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
-    for(let y=0;y<ROWS;y++){
-      for(let x=0;x<COLS;x++){
-        const i = idx(x,y);
-        if(state[i]===1){
-          ctx.fillStyle = cellColor(i);
-          ctx.fillRect(x*CELL, y*CELL, CELL-1, CELL-1);
-          if(aggression[i] > 0.55){
-            ctx.strokeStyle = 'rgba(255,80,90,0.85)'; ctx.lineWidth = 1;
-            ctx.strokeRect(x*CELL+0.5, y*CELL+0.5, CELL-2, CELL-2);
-          } else if(armor[i] > 0.6){
-            ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
-            ctx.strokeRect(x*CELL+0.5, y*CELL+0.5, CELL-2, CELL-2);
-          }
-        } else if(state[i]===2){
-          const frac = clamp(corpseFood[i]/4.2, 0.08, 1);
-          ctx.fillStyle = `rgba(90,60,40,${(0.35+frac*0.5).toFixed(3)})`;
-          ctx.fillRect(x*CELL, y*CELL, CELL-1, CELL-1);
-        } else if(sporeDensity[i] > 0.08){
-          const a = clamp(sporeDensity[i]*0.35, 0, 0.3);
-          ctx.fillStyle = `rgba(176,136,249,${a.toFixed(3)})`;
-          ctx.fillRect(x*CELL, y*CELL, CELL-1, CELL-1);
+    for(let i=0;i<N;i++){
+      if(state[i]===2){
+        const x=i%COLS, y=(i/COLS)|0;
+        const frac = clamp(corpseFood[i]/4.2, 0.08, 1);
+        ctx.fillStyle = `rgba(90,60,40,${(0.35+frac*0.5).toFixed(3)})`;
+        ctx.fillRect(x*CELL, y*CELL, CELL-1, CELL-1);
+      } else if(state[i]===0 && sporeDensity[i] > 0.08){
+        const x=i%COLS, y=(i/COLS)|0;
+        const a = clamp(sporeDensity[i]*0.35, 0, 0.3);
+        ctx.fillStyle = `rgba(176,136,249,${a.toFixed(3)})`;
+        ctx.fillRect(x*CELL, y*CELL, CELL-1, CELL-1);
+      }
+    }
+    for(const body of bodies.values()){
+      const g = body.g;
+      for(const i of body.cells){
+        const x=i%COLS, y=(i/COLS)|0;
+        const bf = isBorder(body,i);
+        ctx.fillStyle = cellColor(body, i, bf && body.cells.length>1);
+        ctx.fillRect(x*CELL, y*CELL, CELL-1, CELL-1);
+        if(g.aggression > 0.55){
+          ctx.strokeStyle='rgba(255,80,90,0.85)'; ctx.lineWidth=1;
+          ctx.strokeRect(x*CELL+0.5, y*CELL+0.5, CELL-2, CELL-2);
+        } else if(g.armor > 0.6){
+          ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.lineWidth=1;
+          ctx.strokeRect(x*CELL+0.5, y*CELL+0.5, CELL-2, CELL-2);
         }
       }
     }
@@ -830,86 +876,80 @@
       ctx.fillRect(0,0,canvas.width,canvas.height);
     }
     drawBodyBoundaries();
+    if(selectedBody !== null && bodies.has(selectedBody)){
+      const b = bodies.get(selectedBody);
+      ctx.strokeStyle = '#ffe08a'; ctx.lineWidth = 2;
+      for(const i of b.cells){
+        const x=i%COLS, y=(i/COLS)|0;
+        ctx.strokeRect(x*CELL+1, y*CELL+1, CELL-3, CELL-3);
+      }
+    }
     if(flashes.length){
       const next = [];
       for(const f of flashes){
-        const x = f.i % COLS, y = Math.floor(f.i / COLS);
-        const a = f.life/6;
+        const x=f.i%COLS, y=(f.i/COLS)|0, a=f.life/6;
         ctx.fillStyle = `rgba(255,220,140,${(a*0.85).toFixed(3)})`;
         ctx.fillRect(x*CELL, y*CELL, CELL-1, CELL-1);
         f.life--;
-        if(f.life > 0) next.push(f);
+        if(f.life>0) next.push(f);
       }
       flashes = next;
     }
   }
 
   function updateClock(){
-    const day = Math.floor(hours/24)+1;
-    const hod = Math.floor(hours%24);
+    const day = Math.floor(hours/24)+1, hod = Math.floor(hours%24);
     document.getElementById('clockDay').textContent = `День ${day}`;
     document.getElementById('clockHod').textContent = `${String(hod).padStart(2,'0')}:00`;
     document.getElementById('clockRate').textContent = `${params.hoursPerMinute.toLocaleString('ru-RU')} ч/мин`;
   }
 
   function updateStats(){
-    let pop=0, corpses=0, sAg=0, sAr=0, sPh=0, sHe=0, sSa=0, sMov=0, sLife=0, sBrood=0, sCyc=0, sCoh=0;
+    let pop=0, corpses=0, multi=0, diff=0, maxBody=0;
+    let sAg=0,sAr=0,sPh=0,sHe=0,sSa=0,sMov=0,sLife=0,sBrood=0,sCyc=0,sEf=0;
     const counts = {photo:0,herb:0,pred:0,sapro:0};
-    const bodyCounts = new Map();
-    for(let i=0;i<N;i++){
-      if(state[i]===1){
-        pop++;
-        sAg+=aggression[i]; sAr+=armor[i]; sPh+=photo[i]; sHe+=herb[i]; sSa+=sapro[i];
-        sMov+=moveSpeed[i]; sLife+=lifespan[i]; sBrood+=broodSize[i]; sCyc+=cycleHours[i]; sCoh+=cohesion[i];
-        counts[guildOf(i)]++;
-        bodyCounts.set(bodyId[i], (bodyCounts.get(bodyId[i])||0)+1);
-      } else if(state[i]===2) corpses++;
+    for(let i=0;i<N;i++) if(state[i]===2) corpses++;
+    for(const b of bodies.values()){
+      const n = b.cells.length, g = b.g;
+      pop += n; counts[b.guild]++;
+      if(n>1) multi++;
+      if(n>maxBody) maxBody = n;
+      if(b.cells.some(c=>!isBorder(b,c))) diff++;
+      sAg+=g.aggression*n; sAr+=g.armor*n; sPh+=g.photo*n; sHe+=g.herb*n; sSa+=g.sapro*n;
+      sMov+=g.moveSpeed*n; sLife+=g.lifespan*n; sBrood+=g.broodSize*n; sCyc+=g.cycleHours*n; sEf+=g.effic*n;
     }
-    let maxBody = 0;
-    for(const v of bodyCounts.values()) if(v>maxBody) maxBody=v;
-    for(let i=0;i<N;i++){
-      cellBodySize[i] = (state[i]===1) ? (bodyCounts.get(bodyId[i])||1) : 0;
-    }
-
-    for(const g of ['herb','pred','sapro']){
-      if(counts[g] > 0 && !guildsEverSeen.has(g)){
-        guildsEverSeen.add(g);
-        logEvent('evo', `★ Впервые появились ${guildLabel(g)}ы!`);
-        showToast(`Эволюционный прорыв: первые ${guildLabel(g)}ы`, true);
+    for(const gk of ['herb','pred','sapro']){
+      if(counts[gk]>0 && !guildsEverSeen.has(gk)){
+        guildsEverSeen.add(gk);
+        logEvent('evo', `★ Впервые появились ${guildLabel(gk)}ы!`);
+        showToast(`Эволюционный прорыв: первые ${guildLabel(gk)}ы`, true);
       }
     }
-
-    document.getElementById('sPop').textContent = pop;
-    document.getElementById('sCorpse').textContent = corpses;
-    document.getElementById('sLineages').textContent = knownLineages.size;
-    document.getElementById('sExtinct').textContent = extinctCount;
-    document.getElementById('sFights').textContent = actionCount;
-    document.getElementById('sMoves').textContent = moveCount;
-    document.getElementById('sSpores').textContent = sporeGermCount;
-    document.getElementById('sBodies').textContent = bodyCounts.size;
-    document.getElementById('sMaxBody').textContent = maxBody;
-    document.getElementById('sLight').textContent = `${Math.round(dayFactor*100)}% (${dayFactor>0.5?'день':'ночь'})`;
+    const set = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent = v; };
+    set('sPop', pop); set('sCorpse', corpses); set('sLineages', knownLineages.size);
+    set('sExtinct', extinctCount); set('sFights', actionCount); set('sMoves', moveCount);
+    set('sSpores', sporeGermCount); set('sBodies', multi); set('sMaxBody', maxBody);
+    set('sDiff', diff);
+    set('sLight', `${Math.round(dayFactor*100)}% (${dayFactor>0.5?'день':'ночь'})`);
 
     const guildColors = {photo:'#4ade80', herb:'#facc15', pred:'#ff5c7a', sapro:'#b088f9'};
-    const total = pop || 1;
-    const bar = document.getElementById('trioBar');
-    bar.innerHTML = Object.keys(guildColors).map(g=>{
-      const w = (counts[g]/total*100);
-      return w>0 ? `<div style="width:${w.toFixed(2)}%;background:${guildColors[g]}"></div>` : '';
+    const orgTotal = bodies.size || 1;
+    document.getElementById('trioBar').innerHTML = Object.keys(guildColors).map(gk=>{
+      const w = counts[gk]/orgTotal*100;
+      return w>0 ? `<div style="width:${w.toFixed(2)}%;background:${guildColors[gk]}"></div>` : '';
     }).join('');
-    const pct = g => pop ? Math.round(counts[g]/total*100) : 0;
-    document.getElementById('trioLegend').textContent = pop
+    const pct = gk => bodies.size ? Math.round(counts[gk]/orgTotal*100) : 0;
+    set('trioLegend', bodies.size
       ? `🟢фото ${pct('photo')}% · 🟡травояд ${pct('herb')}% · 🔴хищн ${pct('pred')}% · 🟣сапро ${pct('sapro')}%`
-      : 'популяция вымерла';
-    document.getElementById('sTraits').textContent = pop
-      ? `свет ${(sPh/pop).toFixed(2)} · травояд ${(sHe/pop).toFixed(2)} · хищн ${(sAg/pop).toFixed(2)} · броня ${(sAr/pop).toFixed(2)} · сапро ${(sSa/pop).toFixed(2)}`
-      : '–';
-    document.getElementById('sTraits2').textContent = pop
-      ? `цикл деления ${(sCyc/pop).toFixed(0)}ч · движение ${(sMov/pop).toFixed(2)} · жизнь ${(sLife/pop).toFixed(0)}ч (~${(sLife/pop/24).toFixed(1)}дн) · потомков ${(sBrood/pop).toFixed(2)} · когезия ${(sCoh/pop).toFixed(3)}`
-      : '–';
+      : 'популяция вымерла');
+    set('sTraits', pop
+      ? `свет ${(sPh/pop).toFixed(2)} · травояд ${(sHe/pop).toFixed(2)} · хищн ${(sAg/pop).toFixed(2)} · броня ${(sAr/pop).toFixed(2)} · сапро ${(sSa/pop).toFixed(2)} · усвоение ${(sEf/pop).toFixed(2)}`
+      : '–');
+    set('sTraits2', pop
+      ? `цикл деления ${(sCyc/pop).toFixed(0)}ч · движение ${(sMov/pop).toFixed(2)} · жизнь ${(sLife/pop).toFixed(0)}ч (~${(sLife/pop/24).toFixed(1)}дн) · потомков ${(sBrood/pop).toFixed(2)}`
+      : '–');
 
-    const sc = document.getElementById('spark');
-    const sctx = sc.getContext('2d');
+    const sc = document.getElementById('spark'), sctx = sc.getContext('2d');
     sctx.clearRect(0,0,sc.width,sc.height);
     if(popHistory.length > 1){
       const maxV = Math.max(...popHistory, 1);
@@ -919,83 +959,112 @@
         const py = sc.height - (v/maxV)*(sc.height-4) - 2;
         i2===0 ? sctx.moveTo(px,py) : sctx.lineTo(px,py);
       });
-      sctx.strokeStyle = '#58e0c9'; sctx.lineWidth = 1.5; sctx.stroke();
+      sctx.strokeStyle='#58e0c9'; sctx.lineWidth=1.5; sctx.stroke();
     }
     updateClock();
+    renderInspector();
   }
 
-  // планировщик в реальном времени: часы/минуту переводятся в реальные шаги через таймстемпы rAF
-  let lastFrameTime = null;
-  let hourBudget = 0;
+  // ─── Инспектор генома: клик по живой клетке показывает ВЕСЬ геном её организма
+  function renderInspector(){
+    const el = document.getElementById('inspector');
+    if(!el) return;
+    if(selectedBody === null || !bodies.has(selectedBody)){
+      el.innerHTML = '<div class="insp-empty">Клик по организму — весь его геном с расшифровкой. Клик по пустой клетке — подсадить нового фототрофа.</div>';
+      return;
+    }
+    const b = bodies.get(selectedBody), g = b.g;
+    const size = b.cells.length;
+    let interior = 0;
+    for(const i of b.cells) if(!isBorder(b,i)) interior++;
+    const plan = templateOf(g.shapeType, g.shapeA, g.shapeB).length;
+    const rows = GENE_INFO.map(([k,label,lo,hi,desc])=>{
+      const v = g[k];
+      const shown = k==='shapeType' ? SHAPE_NAMES[Math.round(v)]
+                  : (Math.abs(v) >= 100 ? Math.round(v) : v.toFixed(2));
+      const frac = clamp((v-lo)/(hi-lo), 0, 1)*100;
+      return `<tr><th>${label}<span class="gk">${k}</span></th>`
+           + `<td class="gv">${shown}</td>`
+           + `<td class="gbarw"><div class="gbar"><i style="width:${frac.toFixed(1)}%"></i></div></td>`
+           + `<td class="gd">${desc}</td></tr>`;
+    }).join('');
+    el.innerHTML =
+      `<div class="insp-head">${guildLabel(b.guild)} · линия #${b.lineage}</div>`
+      + `<div class="insp-sub">возраст ${Math.round(b.age)} ч из ${Math.round(g.lifespan)} · энергия ${b.energy.toFixed(1)}`
+      + ` · клеток ${size} из ${plan} по плану (${SHAPE_NAMES[Math.round(g.shapeType)]})`
+      + ` · барьерных ${size-interior}, внутренних ${interior}`
+      + (interior>0 ? ' — <b>дифференцировано</b>' : ' — сердцевины нет, специализации нет') + `</div>`
+      + `<table class="genes">${rows}</table>`;
+  }
+
+  let lastFrameTime = null, hourBudget = 0;
   function loop(now){
     if(running){
       if(lastFrameTime==null) lastFrameTime = now;
-      const deltaMs = Math.min(now - lastFrameTime, 2000); // защита от скачка после сворачивания вкладки
+      const deltaMs = Math.min(now-lastFrameTime, 2000);  // защита от скачка после сворачивания вкладки
       lastFrameTime = now;
-      hourBudget += params.hoursPerMinute * (deltaMs/60000);
+      hourBudget += params.hoursPerMinute*(deltaMs/60000);
       let steps = Math.min(Math.floor(hourBudget), 4000);
       hourBudget -= steps;
       for(let k=0;k<steps;k++) step();
       if(steps>0){ updateStats(); render(); }
-    } else {
-      lastFrameTime = null;
-    }
+    } else lastFrameTime = null;
     requestAnimationFrame(loop);
   }
 
-  function speedFromSlider(pos){ // pos: 0..100 -> 1..100000, логарифмически
-    return Math.max(1, Math.round(Math.pow(100000, pos/100)));
-  }
-  function sliderFromSpeed(rate){
-    return Math.round(100*Math.log(rate)/Math.log(100000));
-  }
+  function speedFromSlider(pos){ return Math.max(1, Math.round(Math.pow(100000, pos/100))); }
+  function sliderFromSpeed(rate){ return Math.round(100*Math.log(rate)/Math.log(100000)); }
 
-  document.getElementById('btnPlay').addEventListener('click', (e)=>{
-    running = !running;
-    e.target.textContent = running ? 'Пауза' : 'Старт';
+  document.getElementById('btnPlay').addEventListener('click', e=>{
+    running = !running; e.target.textContent = running ? 'Пауза' : 'Старт';
   });
   document.getElementById('btnReset').addEventListener('click', ()=>{
-    reset();
-    document.getElementById('btnPlay').textContent = 'Старт';
-    running = false;
+    reset(); document.getElementById('btnPlay').textContent = 'Старт'; running = false;
   });
   document.getElementById('btnSeed').addEventListener('click', ()=>{
     let guard=0, placed=0;
     while(guard<3000 && placed<6){
       guard++;
       const i = Math.floor(Math.random()*N);
-      if(state[i]===0){ spawnFounder(i, 9+Math.random()*4); placed++; }
+      if(state[i]===0 && spawnFounder(i, 9+Math.random()*4)) placed++;
     }
     updateStats(); render();
   });
-  document.getElementById('speed').addEventListener('input', (e)=>{
+  document.getElementById('speed').addEventListener('input', e=>{
     params.hoursPerMinute = speedFromSlider(parseInt(e.target.value,10));
-    document.getElementById('lblSpeed').textContent = params.hoursPerMinute.toLocaleString('ru-RU') + ' ч/мин';
+    document.getElementById('lblSpeed').textContent = params.hoursPerMinute.toLocaleString('ru-RU')+' ч/мин';
     updateClock();
   });
-  document.getElementById('mutation').addEventListener('input', (e)=>{
+  document.getElementById('mutation').addEventListener('input', e=>{
     params.mutation = parseInt(e.target.value,10)/100;
-    document.getElementById('lblMut').textContent = e.target.value + '%';
+    document.getElementById('lblMut').textContent = e.target.value+'%';
   });
-  document.getElementById('regen').addEventListener('input', (e)=>{
+  document.getElementById('regen').addEventListener('input', e=>{
     params.decomp = parseInt(e.target.value,10)/100;
     document.getElementById('lblRegen').textContent = params.decomp.toFixed(2);
   });
-  document.getElementById('predation').addEventListener('change', (e)=>{ params.predation = e.target.checked; });
-  document.getElementById('daynight').addEventListener('change', (e)=>{ params.dayNight = e.target.checked; });
+  document.getElementById('predation').addEventListener('change', e=>{ params.predation = e.target.checked; });
+  document.getElementById('daynight').addEventListener('change', e=>{ params.dayNight = e.target.checked; });
 
-  canvas.addEventListener('click', (e)=>{
+  canvas.addEventListener('click', e=>{
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height;
     const px = (e.clientX-rect.left)*scaleX, py = (e.clientY-rect.top)*scaleY;
     const x = clamp(Math.floor(px/CELL),0,COLS-1), y = clamp(Math.floor(py/CELL),0,ROWS-1);
     const i = idx(x,y);
-    if(state[i]===0){ spawnFounder(i, 9); render(); updateStats(); }
+    if(state[i]===1 && bodies.has(owner[i])) selectedBody = owner[i];
+    else if(state[i]===0){ spawnFounder(i, 9); selectedBody = null; }
+    render(); updateStats();
   });
 
-  // инициализация слайдера скорости под дефолтное значение hoursPerMinute
+  // справочник генов на странице строится из того же GENE_INFO, что и инспектор —
+  // разойтись с кодом он не может по устройству
+  const ref = document.getElementById('geneRef');
+  if(ref) ref.innerHTML = GENE_INFO.map(([k,label,lo,hi,desc])=>
+    `<tr><th>${label}<span class="gk">${k}</span></th><td class="gr">${lo}…${hi}</td><td class="gd">${desc}</td></tr>`).join('');
+
   document.getElementById('speed').value = sliderFromSpeed(params.hoursPerMinute);
-  document.getElementById('lblSpeed').textContent = params.hoursPerMinute.toLocaleString('ru-RU') + ' ч/мин';
+  document.getElementById('lblSpeed').textContent = params.hoursPerMinute.toLocaleString('ru-RU')+' ч/мин';
 
   reset();
   requestAnimationFrame(loop);
