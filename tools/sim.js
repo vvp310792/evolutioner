@@ -54,6 +54,7 @@ function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0
 let stats = freshStats();
 // поклассовый учёт экономики: uni = одноклеточные, multi = достроенные тела >1 клетки
 let acct = { uni:{h:0,cells:0,inc:0,upk:0,kids:0}, multi:{h:0,cells:0,inc:0,upk:0,kids:0} };
+let gacct = {}; function gReset(){ gacct = {photo:{h:0,inc:0,upk:0,fed:0},herb:{h:0,inc:0,upk:0,fed:0},pred:{h:0,inc:0,upk:0,fed:0},sapro:{h:0,inc:0,upk:0,fed:0}}; } gReset();
 function acctReset(){ acct = { uni:{h:0,cells:0,inc:0,upk:0,kids:0}, multi:{h:0,cells:0,inc:0,upk:0,kids:0} }; }
 
 // ---------- шаблоны формы ----------
@@ -82,11 +83,54 @@ function templateOf(type, a, b) {
 
 const noff = []; for (let dy=-1;dy<=1;dy++) for (let dx=-1;dx<=1;dx++) if (dx||dy) noff.push([dx,dy]);
 const noff2 = []; for (let dy=-2;dy<=2;dy++) for (let dx=-2;dx<=2;dx++) if (dx||dy) noff2.push([dx,dy]);
+const noff4r = []; for (let dy=-4;dy<=4;dy++) for (let dx=-4;dx<=4;dx++) if ((dx||dy) && dx*dx+dy*dy<=16) noff4r.push([dx,dy]);
+
+// Предпосчитанные таблицы соседей. Плоский Int32Array + счётчик на клетку: в горячем
+// цикле исчезают модуло, деление и четыре проверки границ на каждого соседа.
+function buildNb(offs){
+  const k = offs.length;
+  const tab = new Int32Array(N*k), cnt = new Uint8Array(N);
+  for (let y=0;y<ROWS;y++) for (let x=0;x<COLS;x++){
+    const i = idx(x,y); let c = 0;
+    for (let o=0;o<k;o++){
+      const nx = x+offs[o][0], ny = y+offs[o][1];
+      if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+      tab[i*k + c++] = idx(nx,ny);
+    }
+    cnt[i] = c;
+  }
+  return { tab, cnt, k };
+}
+const NB8 = buildNb(noff), NB24 = buildNb(noff2), NB4R = buildNb(noff4r);
+const NB4 = buildNb([[0,-1],[0,1],[-1,0],[1,0]]);
+
+// Ниша клетки массивом: избавляет горячие проверки добычи от bodies.get() по Map.
+const G_PHOTO=0, G_HERB=1, G_PRED=2, G_SAPRO=3, G_NONE=255;
+const GCODE = { photo:G_PHOTO, herb:G_HERB, pred:G_PRED, sapro:G_SAPRO };
+const cellGuild = new Uint8Array(N).fill(G_NONE);
 const senseOffsets = [];
-for (let dy=-6;dy<=6;dy++) for (let dx=-6;dx<=6;dx++) {
-  if (!dx && !dy) continue; const d = Math.hypot(dx,dy); if (d<=6) senseOffsets.push([dx,dy,d]);
+const SENSE_R = 12;
+for (let dy=-SENSE_R;dy<=SENSE_R;dy++) for (let dx=-SENSE_R;dx<=SENSE_R;dx++) {
+  if (!dx && !dy) continue; const d = Math.sqrt(dx*dx+dy*dy); if (d<=SENSE_R) senseOffsets.push([dx,dy,d]);
 }
 senseOffsets.sort((p,q)=>p[2]-q[2]);
+
+// Кандидаты под якорь потомка: предпосчитанное кольцо смещений, отсортированное
+// по расстоянию, + индекс начала каждого целого радиуса. Раньше на КАЖДУЮ попытку
+// считались cos/sin и Math.random для 80 кандидатов — профиль показал 45% всего
+// времени именно здесь, потому что в плотной решётке почти все попытки провальны.
+const RING_MAX = 14;
+const ringOff = [];
+for (let dy=-RING_MAX; dy<=RING_MAX; dy++) for (let dx=-RING_MAX; dx<=RING_MAX; dx++) {
+  if (!dx && !dy) continue;
+  const d = Math.sqrt(dx*dx+dy*dy);
+  if (d <= RING_MAX) ringOff.push([dx, dy, d]);
+}
+ringOff.sort((p,q)=>p[2]-q[2]);
+const ringStart = new Int32Array(RING_MAX+2);
+{ let r=0;
+  for (let i=0;i<ringOff.length;i++){ while (r <= ringOff[i][2] && r <= RING_MAX+1) ringStart[r++] = i; }
+  while (r <= RING_MAX+1) ringStart[r++] = ringOff.length; }
 
 function computeFertility() {
   for (let y=0;y<ROWS;y++) for (let x=0;x<COLS;x++) {
@@ -122,12 +166,12 @@ function tryPlaceBody(g, lineage, anchorX, anchorY, energy) {
   const id = nextBodyId++;
   const body = { id, g, lineage, guild: guildOfGenome(g), ox, oy, tpl,
                  cells: [i0], foot, energy, age: 0, cooldown: g.cycleHours };
-  state[i0] = 1; owner[i0] = id;
+  state[i0] = 1; owner[i0] = id; cellGuild[i0] = GCODE[body.guild];
   // зачаток сразу занимает небольшой комок плана — настолько, насколько есть место
   const want = Math.min(foot.length, 1 + Math.floor(foot.length/3));
   for (let k=0; k<foot.length && body.cells.length<want; k++) {
     const t = foot[k];
-    if (state[t] === 0 && adjacentToBody(body, t)) { state[t]=1; owner[t]=id; body.cells.push(t); }
+    if (state[t] === 0 && adjacentToBody(body, t)) { state[t]=1; owner[t]=id; cellGuild[t]=GCODE[body.guild]; body.cells.push(t); }
   }
   bodies.set(id, body);
   stats.born++; stats.bornBy[body.guild]++;
@@ -135,13 +179,9 @@ function tryPlaceBody(g, lineage, anchorX, anchorY, energy) {
 }
 
 function adjacentToBody(body, t) {
-  const x = t % COLS, y = (t / COLS) | 0;
-  for (const [dx,dy] of noff) {
-    const nx=x+dx, ny=y+dy;
-    if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
-    const ni = idx(nx,ny);
-    if (state[ni]===1 && owner[ni]===body.id) return true;
-  }
+  const c = NB8.cnt[t], base = t*NB8.k, id = body.id;
+  for (let o=0;o<c;o++){ const ni = NB8.tab[base+o];
+    if (state[ni]===1 && owner[ni]===id) return true; }
   return false;
 }
 
@@ -185,8 +225,9 @@ function moveBody(body, dx, dy) {
     if (x<0||x>=COLS||y<0||y>=ROWS) return false;
     newFoot.push(idx(x,y));
   }
-  for (const i of body.cells) { state[i] = 0; owner[i] = 0; }
-  for (const t of targets) { state[t] = 1; owner[t] = body.id; }
+  for (const i of body.cells) { state[i]=0; owner[i]=0; cellGuild[i]=G_NONE; }
+  const gc = GCODE[body.guild];
+  for (const t of targets) { state[t]=1; owner[t]=body.id; cellGuild[t]=gc; }
   body.cells = targets; body.foot = newFoot; body.ox += dx; body.oy += dy;
   stats.moves++;
   return true;
@@ -214,6 +255,18 @@ function mutateGenome(pg, wasPred) {
     g.maxN = Math.max(g.maxN, g.minN + 1);
   }
   g.__endow = 0;
+  // Пакет СМЕНЫ НИШИ. Мутант-травоядное наследует photo~0.8 и получает herb~0.85 —
+  // перевес пограничный, и его потомки тут же сваливаются обратно в фототрофы.
+  // Замерено: травоядных 0-2 особи при положительном сальдо, то есть ниша не
+  // популяция, а мерцающее облако мутантов, и хищнику не на ком жить. Поэтому
+  // смена ниши делается решительной: новый признак поднимается, прежний убирается.
+  const newGuild = guildOfGenome(g), oldGuild = guildOfGenome(pg);
+  if (newGuild !== oldGuild) {
+    const key = { photo:'photo', herb:'herb', pred:'aggression', sapro:'sapro' };
+    const nk = key[newGuild], ok = key[oldGuild];
+    g[nk] = Math.max(g[nk], 0.72 + Math.random()*0.2);
+    g[ok] = Math.min(g[ok], 0.42 + Math.random()*0.1);
+  }
   // Многоклеточность — тоже K-стратегия, и по той же причине, что и хищничество:
   // тело это вложение, которому нужно время окупиться. Без этого пакета линия,
   // впервые построившая тело, вымирает от старости раньше, чем успевает заместиться
@@ -231,7 +284,7 @@ function mutateGenome(pg, wasPred) {
     g.lifespan = Math.max(g.lifespan, 1800 + Math.random()*3200);
     g.moveSpeed = Math.max(g.moveSpeed, 0.65 + Math.random()*0.3);
     g.broodSize = Math.max(g.broodSize, 2);
-    g.__endow = Math.max(g.__endow, 14);   // хватит, чтобы дойти до добычи и один раз поохотиться
+    g.__endow = Math.max(g.__endow, 34);   // хватит, чтобы дойти до добычи и один раз поохотиться
   }
   // тот же принцип для многоклеточности: линия, впервые строящая тело, должна
   // успеть его построить — иначе одноклеточные потомки всегда обгоняют её по размножению
@@ -332,39 +385,52 @@ function step() {
     const senescence = 0.4 / Math.max(200, g.lifespan);
     const nicheSum = g.photo + g.herb + g.aggression + g.sapro;
     const dom = Math.max(g.photo, g.herb, g.aggression, g.sapro);
-    let crowd = 0;
-    for (const i of borderCells) { const x=i%COLS, y=(i/COLS)|0;
-      for (const [dx,dy] of noff) { const nx=x+dx, ny=y+dy;
-        if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===1 && owner[idx(nx,ny)]!==body.id) crowd++; } }
+    // Конкуренция за место сильнее ВНУТРИ своей ниши, чем между нишами: соседи,
+    // живущие с того же ресурса, мешают по-настоящему. Так монокультура фототрофов
+    // прореживает сама себя, а гетеротрофы, которые по устройству ниши всегда сидят
+    // среди чужих клеток, не платят за это (ровно на этом я раньше их и утопил).
+    let crowd = 0, crowdSame = 0;
+    const myCode = GCODE[body.guild];
+    for (let bi2=0; bi2<borderCells.length; bi2++){
+      const i = borderCells[bi2], c = NB8.cnt[i], base = i*NB8.k;
+      for (let o=0;o<c;o++){ const ni = NB8.tab[base+o];
+        if (state[ni]!==1 || owner[ni]===body.id) continue;
+        crowd++;
+        if (cellGuild[ni] === myCode) crowdSame++;
+      } }
     const moveTax = (body.guild==='herb'||body.guild==='pred') ? g.moveSpeed*0.03*size : 0;
     const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
-                 + crowd*0.02 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax;
+                 + crowdSame*0.045 + (crowd-crowdSame)*0.006 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax;
     { const k = (body.foot.length>1 && size>=body.foot.length) ? acct.multi : (body.foot.length===1 ? acct.uni : null);
       if (k) { k.h++; k.cells += size; k.inc += income; k.upk += upkeep; } }
+    { const q = gacct[body.guild]; q.h++; q.inc += income; q.upk += upkeep; }
     body.energy -= upkeep;
+    const eBefore = body.energy;
     if (body.energy <= 0) { for(const i of borderCells) borderMark[i]=0; stats.dStarve++; killBody(body); continue; } // смерть тела целиком: общий пул исчерпан
 
     // ---- питание гетеротрофов: добывает барьер, перерабатывает сердцевина ----
     let ate = false, moved = false;
     if (body.guild !== 'photo') {
       const processing = 1 + INTERIOR_PROCESS * interiorFrac;
-      const preyPred = ni => state[ni]===1 && owner[ni]!==body.id && bodies.has(owner[ni]) &&
-                             (bodies.get(owner[ni]).guild==='herb' || bodies.get(owner[ni]).guild==='pred');
-      const preyHerb = ni => state[ni]===1 && owner[ni]!==body.id && bodies.has(owner[ni]) && bodies.get(owner[ni]).guild==='photo';
-      const wantCorpse = ni => state[ni]===2;
-
+      // Ниша соседа берётся из cellGuild, а не из bodies.get(): три замыкания-предиката
+      // пересоздавались на КАЖДОЕ тело КАЖДЫЙ час и стоили ~7% профиля.
+      const myId = body.id, mode = GCODE[body.guild];
       let targets = [];
-      const pick = body.guild==='pred' ? preyPred : body.guild==='herb' ? preyHerb : wantCorpse;
-      for (const i of borderCells) { const x=i%COLS, y=(i/COLS)|0;
-        for (const [dx,dy] of noff2) { const nx=x+dx, ny=y+dy;
-          if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
-          const ni = idx(nx,ny); if (pick(ni)) targets.push(ni); } }
+      for (let bi3=0; bi3<borderCells.length; bi3++){ const i = borderCells[bi3];
+        const R = mode===G_SAPRO ? NB4R : NB24;
+        const c2 = R.cnt[i], b2 = i*R.k;
+        for (let o=0;o<c2;o++){ const ni = R.tab[b2+o];
+          if (mode===G_SAPRO){ if (state[ni]===2) targets.push(ni); }
+          else if (state[ni]===1 && owner[ni]!==myId){
+            const gq = cellGuild[ni];
+            if (mode===G_PRED ? (gq===G_HERB||gq===G_PRED) : gq===G_PHOTO) targets.push(ni);
+          } } }
 
-      const bites = Math.min(borderCells.length, 4);
+      const bites = Math.min(borderCells.length, 6);   // укусов за час — по числу барьерных клеток
       if (targets.length) {
-        const tgt = targets[Math.floor(Math.random()*targets.length)];
+        let tgt = targets[Math.floor(Math.random()*targets.length)];
         if (body.guild === 'pred' && params.predation) {
-          if (Math.random() < 1-Math.pow(1-g.aggression*0.65, bites)) {
+          for (let bi=0; bi<bites; bi++) if (Math.random() < g.aggression*0.65) {
             const victim = bodies.get(owner[tgt]);
             if (victim) {
               body.energy -= (0.3 + g.aggression*0.6);
@@ -382,7 +448,7 @@ function step() {
             }
           }
         } else if (body.guild === 'herb') {
-          if (Math.random() < 1-Math.pow(1-g.herb*0.45, bites)) {
+          for (let bi=0; bi<bites; bi++) if (Math.random() < g.herb*0.45) {
             const victim = bodies.get(owner[tgt]);
             if (victim) {
               const drain = Math.min(victim.energy*0.4, g.herb*2.6*Math.sqrt(size));
@@ -393,8 +459,8 @@ function step() {
             }
           }
         } else if (body.guild === 'sapro') {
-          if (Math.random() < 1-Math.pow(1-g.sapro*0.55, bites)) {
-            const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*8*Math.sqrt(size));
+          for (let bi=0; bi<bites; bi++) if (Math.random() < g.sapro*0.55) {
+            const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*11*Math.sqrt(size));
             corpseFood[tgt] -= drain;
             body.energy += drain*0.85*g.effic*processing;
             if (corpseFood[tgt] <= 0.001) { state[tgt]=0; corpseFood[tgt]=0; }
@@ -403,12 +469,17 @@ function step() {
         }
       } else if (body.guild==='herb' || body.guild==='pred') {
         // добычи рядом нет — жёсткое движение всем телом к ближайшей
-        const seek = body.guild==='pred' ? preyPred : preyHerb;
+        const seekPred = mode===G_PRED;
         const hx = body.cells[0]%COLS, hy = (body.cells[0]/COLS)|0;
         let found = null;
-        for (const [dx,dy,] of senseOffsets) { const nx=hx+dx, ny=hy+dy;
+        for (let so=0; so<senseOffsets.length; so++){
+          const dx = senseOffsets[so][0], dy = senseOffsets[so][1];
+          const nx=hx+dx, ny=hy+dy;
           if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
-          if (seek(idx(nx,ny))) { found = [dx,dy]; break; } }
+          const ni = idx(nx,ny);
+          if (state[ni]!==1 || owner[ni]===myId) continue;
+          const gq = cellGuild[ni];
+          if (seekPred ? (gq===G_HERB||gq===G_PRED) : gq===G_PHOTO) { found = [dx,dy]; break; } }
         let sx, sy;
         if (found) { sx = Math.sign(found[0]); sy = Math.sign(found[1]); }
         else {
@@ -427,6 +498,7 @@ function step() {
       }
     }
     for (const i of borderCells) borderMark[i] = 0;   // снимаем маркер: доход уже посчитан
+    if (bodies.has(body.id)) gacct[body.guild].fed += Math.max(0, body.energy - eBefore);
     if (!bodies.has(body.id)) continue;
     if (body.energy <= 0) { killBody(body); continue; }
     if (moved) continue;
@@ -448,7 +520,7 @@ function step() {
     if (slot >= 0) {
       // рост не ждёт кулдауна: это не размножение, а достройка собственного тела
       if (body.energy >= growCost + g.thresh*0.35) {
-        state[slot]=1; owner[slot]=body.id; body.cells.push(slot);
+        state[slot]=1; owner[slot]=body.id; cellGuild[slot]=GCODE[body.guild]; body.cells.push(slot);
         body.energy -= growCost; stats.grow++;
       }
       continue;
@@ -469,22 +541,27 @@ function step() {
     for (const [dx,dy] of body.tpl) { pw = Math.max(pw, dx+1); ph = Math.max(ph, dy+1); }
     const pReach = Math.ceil(Math.max(pw,ph)/2);
 
-    function anchorsFor(cTplArr) {
+    // Кандидаты берём из предпосчитанного кольца: без тригонометрии, со случайной
+    // точкой входа (чтобы не было направленной предвзятости) и с ранним выходом.
+    function placeChild(cTplArr, cg, childEnergy) {
       let cw = 1, ch = 1;
-      for (const [dx,dy] of cTplArr) { cw = Math.max(cw, dx+1); ch = Math.max(ch, dy+1); }
-      const cReach = Math.ceil(Math.max(cw,ch)/2);
-      const gap = pReach + cReach + 1;
-      const out = [];
-      for (let rad = gap; rad <= gap + 3; rad++) {
-        for (let a = 0; a < 20; a++) {
-          const th = (a/20 + Math.random()/20)*Math.PI*2;
-          const nx = pcx + Math.round(Math.cos(th)*rad), ny = pcy + Math.round(Math.sin(th)*rad);
-          if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
-          if (state[idx(nx,ny)]===0) out.push([nx,ny]);
-        }
-        if (out.length >= 12) break;
+      for (const o of cTplArr) { if (o[0]+1>cw) cw=o[0]+1; if (o[1]+1>ch) ch=o[1]+1; }
+      const gap = Math.min(RING_MAX, pReach + Math.ceil((cw>ch?cw:ch)/2) + 1);
+      const lo = ringStart[gap], hi = ringStart[Math.min(RING_MAX, gap+3)+1];
+      const span = hi - lo;
+      if (span <= 0) return null;
+      const start = Math.floor(Math.random()*span);
+      let tried = 0;
+      for (let k=0; k<span && tried<18; k++) {
+        const o = ringOff[lo + ((start+k) % span)];
+        const nx = pcx + o[0], ny = pcy + o[1];
+        if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+        if (state[idx(nx,ny)] !== 0) continue;
+        tried++;
+        const child = tryPlaceBody(cg, body.lineage, nx, ny, childEnergy);
+        if (child) return child;
       }
-      return out;
+      return null;
     }
     const wanted = g.broodSize;
     let madeAny = false;
@@ -495,13 +572,8 @@ function step() {
       const cTplArr = templateOf(cg.shapeType, cg.shapeA, cg.shapeB);
       const childCost = perChildCost * (1 + 0.35*(cTplArr.length-1));
       if (body.energy < childCost + g.thresh*0.5) break;
-      const cand = anchorsFor(cTplArr);
-      let child = null;
-      for (const [cx,cy] of cand) {
-        child = tryPlaceBody(cg, body.lineage, cx, cy, Math.max(childCost*0.55, cg.__endow||0));
-        if (child) break;
-      }
-      if (!child) { stats.noSpot++; continue; }
+      const child = placeChild(cTplArr, cg, Math.max(childCost*0.55, cg.__endow||0));
+      if (!child) { stats.noSpot++; body.cooldown = Math.max(6, g.cycleHours*0.3); break; }
       body.energy -= childCost; madeAny = true;
       const k = (body.foot.length>1) ? acct.multi : acct.uni; k.kids++;
     }
@@ -511,7 +583,7 @@ function step() {
 }
 
 function reset(colonies=24) {
-  state.fill(0); owner.fill(0); corpseFood.fill(0); sporeDensity.fill(0);
+  state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
   bodies.clear(); nextBodyId=1; nextLineageId=1; hours=0;
   stats = freshStats();
   for (let y=0;y<ROWS;y++) vGrad[y] = 1 - (y/(ROWS-1))*0.68;
@@ -541,7 +613,8 @@ function snapshot() {
            effic: bodies.size? (effSum/bodies.size).toFixed(2):'-', shapes };
 }
 
-module.exports = { reset, step, snapshot, stats, params, bodies, templateOf, tryPlaceBody, founderGenome,
+module.exports = { reset, step, snapshot, get stats(){ return stats; }, params, bodies, templateOf, tryPlaceBody, founderGenome,
+  get gacct(){ return gacct; }, gReset,
   get acct(){ return acct; }, acctReset,
   get hours(){ return hours; } };
 

@@ -311,13 +311,56 @@
 
   // ─── Геометрия
   const noff = [];  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) if(dx||dy) noff.push([dx,dy]);
-  const noff2 = []; for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++) if(dx||dy) noff2.push([dx,dy]);
   const noff4 = [[0,-1],[0,1],[-1,0],[1,0]];
+  const noff2 = []; for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++) if(dx||dy) noff2.push([dx,dy]);
+  const noff4r = []; for(let dy=-4;dy<=4;dy++) for(let dx=-4;dx<=4;dx++) if((dx||dy) && dx*dx+dy*dy<=16) noff4r.push([dx,dy]);
+  // Радиус восприятия 12, а не 6: при плотности добычи порядка десятка особей на
+  // 4232 клетки шесть клеток означали «не встретит никогда» — замерено, доход хищника
+  // был ровно 0.000 за 178 тело-часов.
+  const SENSE_R = 12;
   const senseOffsets = [];
-  for(let dy=-6;dy<=6;dy++) for(let dx=-6;dx<=6;dx++){
-    if(!dx && !dy) continue; const d = Math.hypot(dx,dy); if(d<=6) senseOffsets.push([dx,dy,d]);
+  for(let dy=-SENSE_R;dy<=SENSE_R;dy++) for(let dx=-SENSE_R;dx<=SENSE_R;dx++){
+    if(!dx && !dy) continue; const d = Math.sqrt(dx*dx+dy*dy); if(d<=SENSE_R) senseOffsets.push([dx,dy,d]);
   }
   senseOffsets.sort((a,b)=>a[2]-b[2]);
+
+  // Предпосчитанные таблицы соседей: из горячего цикла исчезают модуло, деление
+  // и четыре проверки границ на каждого соседа.
+  function buildNb(offs){
+    const k = offs.length, tab = new Int32Array(N*k), cnt = new Uint8Array(N);
+    for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
+      const i = idx(x,y); let c = 0;
+      for(let o=0;o<k;o++){
+        const nx=x+offs[o][0], ny=y+offs[o][1];
+        if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+        tab[i*k + c++] = idx(nx,ny);
+      }
+      cnt[i] = c;
+    }
+    return { tab, cnt, k };
+  }
+  const NB8 = buildNb(noff), NB4 = buildNb(noff4), NB24 = buildNb(noff2), NB4R = buildNb(noff4r);
+
+  // Ниша клетки отдельным массивом: горячие проверки добычи обходятся без Map-поиска
+  const G_PHOTO=0, G_HERB=1, G_PRED=2, G_SAPRO=3, G_NONE=255;
+  const GCODE = { photo:G_PHOTO, herb:G_HERB, pred:G_PRED, sapro:G_SAPRO };
+  const cellGuild = new Uint8Array(N).fill(G_NONE);
+
+  // Кольцо кандидатов под якорь потомка. Раньше на каждую попытку считались cos/sin
+  // и Math.random для 80 кандидатов; профиль показал 45% всего времени именно здесь,
+  // потому что в плотной решётке почти все попытки провальны.
+  const RING_MAX = 14;
+  const ringOff = [];
+  for(let dy=-RING_MAX;dy<=RING_MAX;dy++) for(let dx=-RING_MAX;dx<=RING_MAX;dx++){
+    if(!dx && !dy) continue;
+    const d = Math.sqrt(dx*dx+dy*dy);
+    if(d<=RING_MAX) ringOff.push([dx,dy,d]);
+  }
+  ringOff.sort((a,b)=>a[2]-b[2]);
+  const ringStart = new Int32Array(RING_MAX+2);
+  { let r=0;
+    for(let i=0;i<ringOff.length;i++){ while(r<=ringOff[i][2] && r<=RING_MAX+1) ringStart[r++]=i; }
+    while(r<=RING_MAX+1) ringStart[r++]=ringOff.length; }
 
   const tplCache = new Map();
   function templateOf(type,a,b){
@@ -357,26 +400,20 @@
   function guildLabel(g){ return {photo:'фототроф',herb:'травоядное',pred:'хищник',sapro:'сапротроф'}[g]||g; }
 
   function adjacentToBody(body, t){
-    const x=t%COLS, y=(t/COLS)|0;
-    for(const [dx,dy] of noff){
-      const nx=x+dx, ny=y+dy;
-      if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
-      const ni = idx(nx,ny);
-      if(state[ni]===1 && owner[ni]===body.id) return true;
-    }
+    const c = NB8.cnt[t], base = t*NB8.k, id = body.id;
+    for(let o=0;o<c;o++){ const ni = NB8.tab[base+o];
+      if(state[ni]===1 && owner[ni]===id) return true; }
     return false;
   }
   // Барьерная — та, у которой есть ОРТОГОНАЛЬНЫЙ сосед не из своего тела. По всем
   // восьми проверять нельзя: формы рваные, и клетки, окружённой своими со всех
   // восьми сторон, не бывает даже в теле из 11 — дифференцировка не включалась бы.
   function isBorder(body, i){
-    const x=i%COLS, y=(i/COLS)|0;
-    for(const [dx,dy] of noff4){
-      const nx=x+dx, ny=y+dy;
-      if(nx<0||nx>=COLS||ny<0||ny>=ROWS) return true;
-      const ni = idx(nx,ny);
-      if(owner[ni]!==body.id || state[ni]!==1) return true;
-    }
+    const c = NB4.cnt[i];
+    if(c < 4) return true;                 // край чашки — тоже граница
+    const base = i*NB4.k, id = body.id;
+    for(let o=0;o<c;o++){ const ni = NB4.tab[base+o];
+      if(owner[ni]!==id || state[ni]!==1) return true; }
     return false;
   }
 
@@ -397,11 +434,11 @@
     const id = nextBodyId++;
     const body = { id, g, lineage, guild: guildOfGenome(g), ox, oy, tpl, foot,
                    cells:[i0], energy, age:0, cooldown:g.cycleHours };
-    state[i0]=1; owner[i0]=id;
+    state[i0]=1; owner[i0]=id; cellGuild[i0]=GCODE[body.guild];
     const want = Math.min(foot.length, 1 + Math.floor(foot.length/3));  // зачаток — сразу комок
     for(let k=0;k<foot.length && body.cells.length<want;k++){
       const t = foot[k];
-      if(state[t]===0 && adjacentToBody(body,t)){ state[t]=1; owner[t]=id; body.cells.push(t); }
+      if(state[t]===0 && adjacentToBody(body,t)){ state[t]=1; owner[t]=id; cellGuild[t]=GCODE[body.guild]; body.cells.push(t); }
     }
     bodies.set(id, body);
     if(!knownLineages.has(lineage)){ knownLineages.add(lineage); lineageHueJitter[lineage] = (Math.random()*36-18); }
@@ -412,7 +449,7 @@
     const rel = RELEASE[body.guild] * (corpseFrac===undefined ? 1 : corpseFrac);
     for(const i of body.cells){
       if(rel > 0.001){ state[i]=2; corpseFood[i]=rel; } else state[i]=0;
-      owner[i]=0;
+      owner[i]=0; cellGuild[i]=G_NONE;
     }
     if(selectedBody === body.id) selectedBody = null;
     bodies.delete(body.id);
@@ -433,8 +470,9 @@
       if(x<0||x>=COLS||y<0||y>=ROWS) return false;
       newFoot.push(idx(x,y));
     }
-    for(const i of body.cells){ state[i]=0; owner[i]=0; }
-    for(const t of targets){ state[t]=1; owner[t]=body.id; }
+    for(const i of body.cells){ state[i]=0; owner[i]=0; cellGuild[i]=G_NONE; }
+    const gc = GCODE[body.guild];
+    for(const t of targets){ state[t]=1; owner[t]=body.id; cellGuild[t]=gc; }
     body.cells = targets; body.foot = newFoot; body.ox += dx; body.oy += dy;
     moveCount++;
     return true;
@@ -462,6 +500,17 @@
       g.maxN = Math.max(g.maxN, g.minN+1);
     }
     g.__endow = 0;
+    // Пакет СМЕНЫ НИШИ. Мутант-травоядное наследует photo~0.8 и получает herb~0.85 —
+    // перевес пограничный, и потомки тут же сваливаются обратно в фототрофы. Замерено:
+    // травоядных 0-2 особи при положительном сальдо, то есть ниша не популяция, а
+    // мерцающее облако мутантов, и хищнику не на ком жить. Смена ниши делается решительной.
+    const newGuild = guildOfGenome(g), oldGuild = guildOfGenome(pg);
+    if(newGuild !== oldGuild){
+      const key = { photo:'photo', herb:'herb', pred:'aggression', sapro:'sapro' };
+      const nk = key[newGuild], ok = key[oldGuild];
+      g[nk] = Math.max(g[nk], 0.72 + Math.random()*0.2);
+      g[ok] = Math.min(g[ok], 0.42 + Math.random()*0.1);
+    }
     // Многоклеточность — K-стратегия ровно по той же причине, что и хищничество:
     // тело это вложение, которому нужно время окупиться. Без пакета линия, впервые
     // построившая тело, вымирает от старости раньше, чем успевает заместиться
@@ -474,7 +523,8 @@
       g.lifespan = Math.max(g.lifespan, 1800 + Math.random()*3200);
       g.moveSpeed = Math.max(g.moveSpeed, 0.65 + Math.random()*0.3);
       g.broodSize = Math.max(g.broodSize, 2);
-      g.__endow = Math.max(g.__endow, 14);   // хватит дойти до добычи и один раз поохотиться
+      g.__endow = Math.max(g.__endow, 34);   // при плотности добычи ~1 на 300 клеток до неё
+      // идти около десяти клеток по клетке в час, а жил хищник ровно десять часов
     }
     return g;
   }
@@ -573,37 +623,52 @@
       const senescence = 0.4/Math.max(200, g.lifespan);
       const nicheSum = g.photo+g.herb+g.aggression+g.sapro;
       const dom = Math.max(g.photo,g.herb,g.aggression,g.sapro);
-      let crowd = 0;
-      for(const i of borderCells){ const x=i%COLS, y=(i/COLS)|0;
-        for(const [dx,dy] of noff){ const nx=x+dx, ny=y+dy;
-          if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS){ const ni=idx(nx,ny);
-            if(state[ni]===1 && owner[ni]!==body.id) crowd++; } } }
+      // Конкуренция за место сильнее ВНУТРИ своей ниши, чем между нишами: соседи с
+      // того же ресурса мешают по-настоящему. Так монокультура фототрофов прореживает
+      // сама себя, а гетеротрофы, по устройству ниши всегда сидящие среди чужих клеток,
+      // за это не платят — ровно на этом я их раньше и утопил, подняв общий налог.
+      let crowd = 0, crowdSame = 0;
+      const myCode = GCODE[body.guild];
+      for(let bx=0; bx<borderCells.length; bx++){
+        const i = borderCells[bx], c = NB8.cnt[i], base = i*NB8.k;
+        for(let o=0;o<c;o++){ const ni = NB8.tab[base+o];
+          if(state[ni]!==1 || owner[ni]===body.id) continue;
+          crowd++;
+          if(cellGuild[ni] === myCode) crowdSame++;
+        } }
       const moveTax = guildIsHetero && body.guild!=='sapro' ? g.moveSpeed*0.03*size : 0;
       const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
-                   + crowd*0.02 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax;
+                   + crowdSame*0.045 + (crowd-crowdSame)*0.006 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax;
       body.energy -= upkeep;
       if(body.energy <= 0){ killBody(body); continue; }           // гибнет ЦЕЛИКОМ: общий пул исчерпан
 
       let moved = false;
       if(guildIsHetero){
         const processing = 1 + INTERIOR_PROCESS*interiorFrac;
-        const bites = Math.min(borderCells.length, 4);   // кормится каждая барьерная клетка
-        const isPrey = ni => state[ni]===1 && owner[ni]!==body.id && bodies.has(owner[ni]);
-        const preyPred = ni => isPrey(ni) && (bodies.get(owner[ni]).guild==='herb' || bodies.get(owner[ni]).guild==='pred');
-        const preyHerb = ni => isPrey(ni) && bodies.get(owner[ni]).guild==='photo';
-        const wantCorpse = ni => state[ni]===2;
-        const pick = body.guild==='pred' ? preyPred : body.guild==='herb' ? preyHerb : wantCorpse;
-
+        // Кормится КАЖДАЯ барьерная клетка. Раньше тело делало один укус в час
+        // независимо от размера, и гетеротрофы не выходили на безубыточность.
+        const bites = Math.min(borderCells.length, 6);
+        // Ниша соседа берётся из cellGuild: три замыкания-предиката пересоздавались
+        // на каждое тело каждый час и стоили около 7% профиля.
+        const myId = body.id, mode = GCODE[body.guild];
         const targets = [];
-        for(const i of borderCells){ const x=i%COLS, y=(i/COLS)|0;
-          for(const [dx,dy] of noff2){ const nx=x+dx, ny=y+dy;
-            if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
-            const ni = idx(nx,ny); if(pick(ni)) targets.push(ni); } }
+        for(let bx=0; bx<borderCells.length; bx++){
+          const i = borderCells[bx];
+          // сапротроф сидячий, гифы дотягиваются дальше соседних клеток — иначе он
+          // умирает рядом с изобилием трупов, до которых просто не может дойти
+          const R = mode===G_SAPRO ? NB4R : NB24;
+          const c2 = R.cnt[i], b2 = i*R.k;
+          for(let o=0;o<c2;o++){ const ni = R.tab[b2+o];
+            if(mode===G_SAPRO){ if(state[ni]===2) targets.push(ni); }
+            else if(state[ni]===1 && owner[ni]!==myId){
+              const gq = cellGuild[ni];
+              if(mode===G_PRED ? (gq===G_HERB||gq===G_PRED) : gq===G_PHOTO) targets.push(ni);
+            } } }
 
         if(targets.length){
           const tgt = targets[Math.floor(Math.random()*targets.length)];
           if(body.guild==='pred' && params.predation){
-            if(Math.random() < 1-Math.pow(1-g.aggression*0.65, bites)){
+            for(let bi=0; bi<bites; bi++) if(Math.random() < g.aggression*0.65){
               const victim = bodies.get(owner[tgt]);
               if(victim){
                 body.energy -= (0.3 + g.aggression*0.6);
@@ -629,7 +694,7 @@
               }
             }
           } else if(body.guild==='herb'){
-            if(Math.random() < 1-Math.pow(1-g.herb*0.45, bites)){
+            for(let bi=0; bi<bites; bi++) if(Math.random() < g.herb*0.45){
               const victim = bodies.get(owner[tgt]);
               if(victim){
                 const drain = Math.min(victim.energy*0.4, g.herb*2.6*Math.sqrt(size));
@@ -645,8 +710,8 @@
               }
             }
           } else if(body.guild==='sapro'){
-            if(Math.random() < 1-Math.pow(1-g.sapro*0.55, bites)){
-              const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*8*Math.sqrt(size));
+            for(let bi=0; bi<bites; bi++) if(Math.random() < g.sapro*0.55){
+              const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*11*Math.sqrt(size));
               corpseFood[tgt] -= drain;
               body.energy += drain*0.85*g.effic*processing;
               actionCount++;
@@ -658,12 +723,17 @@
           }
         } else if(body.guild==='herb' || body.guild==='pred'){
           // жёсткое движение ВСЕМ телом: форма сохраняется, цена пропорциональна размеру
-          const seek = body.guild==='pred' ? preyPred : preyHerb;
+          const seekPred = mode===G_PRED;
           const hx = body.cells[0]%COLS, hy = (body.cells[0]/COLS)|0;
           let found = null;
-          for(const [dx,dy] of senseOffsets){ const nx=hx+dx, ny=hy+dy;
+          for(let so=0; so<senseOffsets.length; so++){
+            const dx=senseOffsets[so][0], dy=senseOffsets[so][1];
+            const nx=hx+dx, ny=hy+dy;
             if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
-            if(seek(idx(nx,ny))){ found=[dx,dy]; break; } }
+            const ni = idx(nx,ny);
+            if(state[ni]!==1 || owner[ni]===myId) continue;
+            const gq = cellGuild[ni];
+            if(seekPred ? (gq===G_HERB||gq===G_PRED) : gq===G_PHOTO){ found=[dx,dy]; break; } }
           let sx, sy;
           if(found){ sx=Math.sign(found[0]); sy=Math.sign(found[1]); }
           else {
@@ -701,7 +771,7 @@
       }
       if(slot >= 0){
         if(body.energy >= growCost + g.thresh*0.35){
-          state[slot]=1; owner[slot]=body.id; body.cells.push(slot);
+          state[slot]=1; owner[slot]=body.id; cellGuild[slot]=GCODE[body.guild]; body.cells.push(slot);
           body.energy -= growCost;
         }
         continue;
@@ -714,8 +784,8 @@
       for(const i of body.cells){ pcx += i%COLS; pcy += (i/COLS)|0; }
       pcx = Math.round(pcx/size); pcy = Math.round(pcy/size);
       let pw=1, ph=1;
-      for(const [dx,dy] of body.tpl){ pw=Math.max(pw,dx+1); ph=Math.max(ph,dy+1); }
-      const pReach = Math.ceil(Math.max(pw,ph)/2);
+      for(const o of body.tpl){ if(o[0]+1>pw) pw=o[0]+1; if(o[1]+1>ph) ph=o[1]+1; }
+      const pReach = Math.ceil((pw>ph?pw:ph)/2);
 
       let madeAny = false;
       for(let k=0;k<g.broodSize;k++){
@@ -727,21 +797,29 @@
         if(body.energy < childCost + g.thresh*0.5) break;
         // Якорь нельзя брать вплотную к родителю: контур ребёнка центрируется на якоре,
         // и у крупного плана он накрыл бы клетки самого родителя. Зазор считается по
-        // размеру РЕБЁНКА: для тела 4x4 контур идёт от -1 до +2 от якоря.
+        // размеру РЕБЁНКА: для тела 4x4 контур идёт от -1 до +2 от якоря. Кандидаты
+        // берутся из предпосчитанного кольца со случайной точкой входа — без cos/sin.
         let cw=1, ch=1;
-        for(const [dx,dy] of cTplArr){ cw=Math.max(cw,dx+1); ch=Math.max(ch,dy+1); }
-        const gap = pReach + Math.ceil(Math.max(cw,ch)/2) + 1;
+        for(const o of cTplArr){ if(o[0]+1>cw) cw=o[0]+1; if(o[1]+1>ch) ch=o[1]+1; }
+        const gap = Math.min(RING_MAX, pReach + Math.ceil((cw>ch?cw:ch)/2) + 1);
+        const lo = ringStart[gap], hi = ringStart[Math.min(RING_MAX, gap+3)+1];
+        const span = hi - lo;
         let child = null;
-        for(let rad=gap; rad<=gap+3 && !child; rad++){
-          for(let a=0;a<20 && !child;a++){
-            const th = (a/20 + Math.random()/20)*Math.PI*2;
-            const nx = pcx + Math.round(Math.cos(th)*rad), ny = pcy + Math.round(Math.sin(th)*rad);
+        if(span > 0){
+          const start = Math.floor(Math.random()*span);
+          let tried = 0;
+          for(let q=0; q<span && tried<18 && !child; q++){
+            const o = ringOff[lo + ((start+q) % span)];
+            const nx = pcx + o[0], ny = pcy + o[1];
             if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
-            if(state[idx(nx,ny)]!==0) continue;
+            if(state[idx(nx,ny)] !== 0) continue;
+            tried++;
             child = tryPlaceBody(cg, body.lineage, nx, ny, Math.max(childCost*0.55, cg.__endow||0));
           }
         }
-        if(!child) continue;
+        // Провал по месту ставит паузу, а не повторяется каждый час: замерено
+        // 19,4 млн неудачных размещений за 10000 часов — это и был главный расход.
+        if(!child){ body.cooldown = Math.max(6, g.cycleHours*0.3); break; }
         body.energy -= childCost;
         madeAny = true;
       }
@@ -786,7 +864,7 @@
   }
 
   function reset(){
-    state.fill(0); owner.fill(0); corpseFood.fill(0); sporeDensity.fill(0);
+    state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
     bodies.clear(); nextBodyId = 1; nextLineageId = 1; selectedBody = null;
     for(let y=0;y<ROWS;y++) vGrad[y] = 1 - (y/(ROWS-1))*0.68;
     phaseX = Math.random()*10; phaseY = Math.random()*10;
@@ -1004,10 +1082,20 @@
       const deltaMs = Math.min(now-lastFrameTime, 2000);  // защита от скачка после сворачивания вкладки
       lastFrameTime = now;
       hourBudget += params.hoursPerMinute*(deltaMs/60000);
-      let steps = Math.min(Math.floor(hourBudget), 4000);
-      hourBudget -= steps;
-      for(let k=0;k<steps;k++) step();
-      if(steps>0){ updateStats(); render(); }
+      let steps = Math.min(Math.floor(hourBudget), 20000);
+      // Пачка ограничена ВРЕМЕНЕМ, а не только числом шагов: на максимуме ползунка
+      // цикл иначе занимает поток целиком, страница перестаёт отвечать (замерено:
+      // 0 кадров в секунду), и ни кнопки, ни ползунки не работают. Недостижимую
+      // скорость всё равно не выдать, но интерфейс обязан оставаться живым.
+      const budgetEnd = performance.now() + 12;
+      let done = 0;
+      while(done < steps){
+        step(); done++;
+        if((done & 63) === 0 && performance.now() > budgetEnd) break;
+      }
+      hourBudget -= done;
+      if(hourBudget > params.hoursPerMinute) hourBudget = params.hoursPerMinute;  // не копим долг
+      if(done>0){ updateStats(); render(); }
     } else lastFrameTime = null;
     requestAnimationFrame(loop);
   }
