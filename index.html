@@ -115,6 +115,10 @@
   .gbarw{width:66px}
   .gbar{height:5px;background:#222d45;border-radius:3px;overflow:hidden}
   .gbar i{display:block;height:100%;background:#58e0c9}
+  tr.goff th,tr.goff .gv{opacity:.4}
+  tr.goff .gv{text-decoration:line-through}
+  tr.goff .gbar i{background:#4a5568}
+  tr.goff .gd{opacity:.65}
   @media(max-width:560px){ .gbarw{display:none} .gd{font-size:11px} }
 </style>
 </head>
@@ -315,6 +319,19 @@
     ['shapeB',     'размер Б',        1,5,      'Высота прямоугольника и малая полуось овала. У квадрата и круга не используется.'],
   ];
   const GENES = GENE_INFO.map(g=>g[0]);
+  // Какие гены реально работают у данной ниши. Ген photo у травоядного унаследован
+  // от предка-фототрофа и придавлен пакетом смены ниши, но дохода не даёт вовсе:
+  // свет начисляется единственным местом под условием guild==='photo'. Организм
+  // платит за такой ген как за балласт — и показывать его наравне с рабочими нельзя.
+  function geneActive(key, guild){
+    if(key==='photo') return guild==='photo';
+    if(key==='herb') return guild==='herb';
+    if(key==='aggression') return guild==='pred';
+    if(key==='sapro') return guild==='sapro';
+    if(key==='effic') return guild!=='photo';          // у фототрофа усвоение играет сам ген photo
+    if(key==='moveSpeed') return guild==='herb' || guild==='pred';   // photo и sapro сидячие
+    return true;
+  }
   const RANGE = {}; GENE_INFO.forEach(g=> RANGE[g[0]] = [g[2],g[3]]);
   const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
                   photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150 };
@@ -1078,8 +1095,21 @@
     set('trioLegend', bodies.size
       ? `🟢фото ${pct('photo')}% · 🟡травояд ${pct('herb')}% · 🔴хищн ${pct('pred')}% · 🟣сапро ${pct('sapro')}%`
       : 'популяция вымерла');
+    // Каждый пищевой ген усредняется ТОЛЬКО по своей нише: усреднять ген photo по
+    // травоядным бессмысленно — он у них есть, но не работает, и общее среднее
+    // создавало впечатление, будто травоядные фотосинтезируют.
+    const nicheGene = {photo:[0,0], herb:[0,0], pred:[0,0], sapro:[0,0]};
+    let armSum=0, efSum=0, efN=0;
+    for(const b of bodies.values()){
+      const n = b.cells.length, gg = b.g;
+      const val = {photo:gg.photo, herb:gg.herb, pred:gg.aggression, sapro:gg.sapro}[b.guild];
+      nicheGene[b.guild][0] += val*n; nicheGene[b.guild][1] += n;
+      armSum += gg.armor*n;
+      if(b.guild!=='photo'){ efSum += gg.effic*n; efN += n; }
+    }
+    const ng = k => nicheGene[k][1] ? (nicheGene[k][0]/nicheGene[k][1]).toFixed(2) : '–';
     set('sTraits', pop
-      ? `свет ${(sPh/pop).toFixed(2)} · травояд ${(sHe/pop).toFixed(2)} · хищн ${(sAg/pop).toFixed(2)} · броня ${(sAr/pop).toFixed(2)} · сапро ${(sSa/pop).toFixed(2)} · усвоение ${(sEf/pop).toFixed(2)}`
+      ? `фотосинтез ${ng('photo')} · травоядность ${ng('herb')} · хищность ${ng('pred')} · сапротрофия ${ng('sapro')} (каждый — по своей нише) · броня ${(armSum/pop).toFixed(2)} · усвоение ${efN?(efSum/efN).toFixed(2):'–'}`
       : '–');
     set('sTraits2', pop
       ? `цикл деления ${(sCyc/pop).toFixed(0)}ч · движение ${(sMov/pop).toFixed(2)} · жизнь ${(sLife/pop).toFixed(0)}ч (~${(sLife/pop/24).toFixed(1)}дн) · потомков ${(sBrood/pop).toFixed(2)}`
@@ -1116,13 +1146,16 @@
     const plan = templateOf(g.shapeType, g.shapeA, g.shapeB).length;
     const rows = GENE_INFO.map(([k,label,lo,hi,desc])=>{
       const v = g[k];
+      const on = geneActive(k, b.guild);
       const shown = k==='shapeType' ? SHAPE_NAMES[Math.round(v)]
                   : (Math.abs(v) >= 100 ? Math.round(v) : v.toFixed(2));
       const frac = clamp((v-lo)/(hi-lo), 0, 1)*100;
-      return `<tr><th>${label}<span class="gk">${k}</span></th>`
+      const note = on ? desc
+        : `<b>Не работает у этой ниши</b> — ген унаследован и стоит апкипа как балласт, но дохода не даёт. ${desc}`;
+      return `<tr class="${on?'':'goff'}"><th>${label}<span class="gk">${k}</span></th>`
            + `<td class="gv">${shown}</td>`
            + `<td class="gbarw"><div class="gbar"><i style="width:${frac.toFixed(1)}%"></i></div></td>`
-           + `<td class="gd">${desc}</td></tr>`;
+           + `<td class="gd">${note}</td></tr>`;
     }).join('');
     el.innerHTML =
       `<div class="insp-head">${guildLabel(b.guild)} · линия #${b.lineage}</div>`
