@@ -169,6 +169,10 @@
       <input type="range" id="mutation" min="0" max="60" value="12">
     </div>
     <div class="field">
+      <label>Освещённость <b id="lblLight">0.62</b></label>
+      <input type="range" id="light" min="15" max="150" value="62">
+    </div>
+    <div class="field">
       <label>Скорость разложения <b id="lblRegen">0.30</b></label>
       <input type="range" id="regen" min="5" max="60" value="30">
     </div>
@@ -257,7 +261,6 @@
   let corpseFood = new Float32Array(N);
   let sporeDensity = new Float32Array(N);
   let fertility = new Float32Array(N);
-  let vGrad = new Float32Array(ROWS);
 
   let bodies = new Map();               // id -> организм (см. tryPlaceBody)
   let nextBodyId = 1, nextLineageId = 1;
@@ -268,7 +271,12 @@
   let phaseX = 0, phaseY = 0, dayFactor = 1;
   let guildsEverSeen = new Set(), running = false, selectedBody = null;
 
-  const params = { hoursPerMinute:24, mutation:0.12, decomp:0.3, predation:true, dayNight:true };
+    // Чашка — плоская плёнка, на которую смотрят СВЕРХУ, поэтому свет равномерен по
+  // всей площади. Раньше стояло `1 - (y/(ROWS-1))*0.68` — падение на 68% сверху вниз,
+  // логика водной толщи, снятой сбоку: нижняя треть пустовала. Неоднородность дают
+  // дрейфующие пятна плодородия. Значение 0.62 подобрано прогонами: при 0.66 растений
+  // слишком много и дифференцировка падает, при 0.52 случается вымирание.
+  const params = { hoursPerMinute:24, mutation:0.12, decomp:0.3, light:0.62, predation:true, dayNight:true };
 
   const PHOTO_GAIN = 3.0, MACRO_MUT_CHANCE = 0.13, MOVE_COST = 0.10;
   const RELEASE = { photo:2.2, herb:2.8, pred:4.2, sapro:1.8 };
@@ -291,7 +299,6 @@
   const ASSIM_CAP = 0.9;
   const ASSIM_BASE = { herb: 0.70, pred: 0.88, sapro: 0.80 };
   const GROWTH_COST_FRAC = 0.20;
-  const LIGHT_LEVEL = 0.62;  // равномерная освещённость плоской плёнки
   const GRAZE_LEFT = 0.12;   // от съеденного растения остаётся лишь остаток, а не полный труп
   const SAT = 1.0;           // насколько час кормёжки должен окупать расходы, чтобы остаться
   const HFRAC = 0.35, HCAP = 8, HMIN = 0.4;   // доля энергии растения, потолок и минимум укуса  // вырастить свою клетку много дешевле, чем снарядить потомка
@@ -644,7 +651,7 @@
         for(const i of body.cells){
           const y = (i/COLS)|0;
           const synth = !differentiated ? 1 : (isBorder(body,i) ? BORDER_SYNTH : INTERIOR_SYNTH);
-          income += g.photo * vGrad[y] * dayFactor * PHOTO_GAIN * fertility[i] * synth;
+          income += g.photo * params.light * dayFactor * PHOTO_GAIN * fertility[i] * synth;
         }
       }
       body.energy += income;
@@ -942,14 +949,7 @@
   function reset(){
     state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
     bodies.clear(); nextBodyId = 1; nextLineageId = 1; selectedBody = null;
-    // Чашка — плоская плёнка, на которую смотрят СВЕРХУ, поэтому свет равномерен.
-    // Раньше стояло `1 - (y/(ROWS-1))*0.68` — падение на 68% сверху вниз, то есть
-    // логика водной толщи, снятой сбоку: нижняя треть чашки была почти тёмной и
-    // пустовала. Пространственную неоднородность дают дрейфующие пятна плодородия.
-    // Уровень 0.62 подобран прогонами: среднее прежнего градиента было 0.66, но при
-    // нём пригодной становится вся площадь, растений выходит слишком много и в части
-    // прогонов выдавливаются хищники и сапротрофы. При 0.52 уже случается вымирание.
-    for(let y=0;y<ROWS;y++) vGrad[y] = LIGHT_LEVEL;
+
     phaseX = Math.random()*10; phaseY = Math.random()*10;
     computeFertility();
     document.getElementById('log').innerHTML = '';
@@ -1091,7 +1091,7 @@
     set('sExtinct', extinctCount); set('sFights', actionCount); set('sMoves', moveCount);
     set('sSpores', sporeGermCount); set('sBodies', multi); set('sMaxBody', maxBody);
     set('sDiff', diff);
-    set('sLight', `${Math.round(dayFactor*100)}% (${dayFactor>0.5?'день':'ночь'})`);
+    set('sLight', `${(params.light*dayFactor).toFixed(2)} (${dayFactor>0.5?'день':'ночь'}, макс ${params.light.toFixed(2)})`);
 
     const guildColors = {photo:'#4ade80', herb:'#facc15', pred:'#ff5c7a', sapro:'#b088f9'};
     const orgTotal = bodies.size || 1;
@@ -1228,6 +1228,10 @@
   document.getElementById('mutation').addEventListener('input', e=>{
     params.mutation = parseInt(e.target.value,10)/100;
     document.getElementById('lblMut').textContent = e.target.value+'%';
+  });
+  document.getElementById('light').addEventListener('input', e=>{
+    params.light = parseInt(e.target.value,10)/100;
+    document.getElementById('lblLight').textContent = params.light.toFixed(2);
   });
   document.getElementById('regen').addEventListener('input', e=>{
     params.decomp = parseInt(e.target.value,10)/100;

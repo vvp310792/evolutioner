@@ -28,7 +28,7 @@ const ASSIM_CAP = 0.9;
 const ASSIM_BASE = { herb: 0.70, pred: 0.88, sapro: 0.80 };
 const GROWTH_COST_FRAC = 0.20;  // вырастить свою клетку много дешевле, чем снарядить потомка
 const AGE_SCALE = Math.sqrt;
-const LIGHT_LEVEL = 0.62;   // равномерная освещённость плоской плёнки   // равномерная освещённость плоской плёнки
+   // равномерная освещённость плоской плёнки
 const GRAZE_LEFT = 0.12;   // от съеденного растения остаётся лишь остаток
 
 const SAT = 1.0;   // насколько час кормёжки должен окупать расходы, чтобы остаться на месте
@@ -61,7 +61,7 @@ let bodies = new Map();
 let nextBodyId = 1, nextLineageId = 1;
 let hours = 0, phaseX = 0, phaseY = 0, dayFactor = 1;
 const order = [];   // переиспользуемый буфер обхода тел
-let params = { mutation: 0.12, decomp: 0.3, predation: true, dayNight: true };
+let params = { mutation: 0.12, decomp: 0.3, light: 0.62, predation: true, dayNight: true };
 function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0,
   dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0,
   bornBy:{photo:0,herb:0,pred:0,sapro:0}, diedBy:{photo:0,herb:0,pred:0,sapro:0},
@@ -656,7 +656,7 @@ function reset(colonies=24) {
   // логика водной толщи, снятой сбоку. Значение 0.66 — это среднее прежнего
   // градиента: суммарный световой бюджет чашки не изменился, изменилось только
   // его распределение. Пространственную неоднородность дают пятна плодородия.
-  for (let y=0;y<ROWS;y++) vGrad[y] = LIGHT_LEVEL;
+  for (let y=0;y<ROWS;y++) vGrad[y] = params.light;
   phaseX = Math.random()*10; phaseY = Math.random()*10;
   computeFertility();
   let placed=0, guard=0;
