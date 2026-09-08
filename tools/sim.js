@@ -28,6 +28,7 @@ const ASSIM_CAP = 0.9;
 const ASSIM_BASE = { herb: 0.70, pred: 0.88, sapro: 0.80 };
 const GROWTH_COST_FRAC = 0.20;  // вырастить свою клетку много дешевле, чем снарядить потомка
 const AGE_SCALE = Math.sqrt;
+const LIGHT_LEVEL = 0.62;   // равномерная освещённость плоской плёнки   // равномерная освещённость плоской плёнки
 const GRAZE_LEFT = 0.12;   // от съеденного растения остаётся лишь остаток
 
 const SAT = 1.0;   // насколько час кормёжки должен окупать расходы, чтобы остаться на месте
@@ -650,7 +651,12 @@ function reset(colonies=24) {
   state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
   bodies.clear(); nextBodyId=1; nextLineageId=1; hours=0;
   stats = freshStats();
-  for (let y=0;y<ROWS;y++) vGrad[y] = 1 - (y/(ROWS-1))*0.68;
+  // Чашка — плоская плёнка, на которую смотрят СВЕРХУ, поэтому свет равномерен.
+  // Раньше стояло `1 - (y/(ROWS-1))*0.68` — падение на 68% сверху вниз, то есть
+  // логика водной толщи, снятой сбоку. Значение 0.66 — это среднее прежнего
+  // градиента: суммарный световой бюджет чашки не изменился, изменилось только
+  // его распределение. Пространственную неоднородность дают пятна плодородия.
+  for (let y=0;y<ROWS;y++) vGrad[y] = LIGHT_LEVEL;
   phaseX = Math.random()*10; phaseY = Math.random()*10;
   computeFertility();
   let placed=0, guard=0;
