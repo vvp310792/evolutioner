@@ -27,7 +27,8 @@ const ASSIM_CAP = 0.9;
 // детрит — между ними. Все три строго меньше единицы.
 const ASSIM_BASE = { herb: 0.70, pred: 0.88, sapro: 0.80 };
 const GROWTH_COST_FRAC = 0.20;  // вырастить свою клетку много дешевле, чем снарядить потомка
-const AGE_SCALE = Math.sqrt;    // старение растёт с размером тела, но не линейно  // вырастить свою клетку дешевле, чем породить организм  // внутренние перерабатывают добытое барьером
+const AGE_SCALE = Math.sqrt;
+    // старение растёт с размером тела, но не линейно  // вырастить свою клетку дешевле, чем породить организм  // внутренние перерабатывают добытое барьером
 
 const GENES = ['metab','effic','thresh','costFrac','minN','maxN','aggression','armor',
                'photo','herb','sapro','cycleHours','moveSpeed','lifespan','broodSize',
@@ -443,6 +444,7 @@ function step() {
       if (targets.length) {
         let tgt = targets[Math.floor(Math.random()*targets.length)];
         if (body.guild === 'pred' && params.predation) {
+          ate = true;   // добыча в пределах досягаемости: дерёмся, а не уходим
           for (let bi=0; bi<bites; bi++) if (Math.random() < g.aggression*0.65) {
             const victim = bodies.get(owner[tgt]);
             if (victim) {
@@ -461,10 +463,10 @@ function step() {
             }
           }
         } else if (body.guild === 'herb') {
-          for (let bi=0; bi<bites; bi++) if (Math.random() < g.herb*0.45) {
+          for (let bi=0; bi<bites; bi++) {
             const victim = bodies.get(owner[tgt]);
             if (victim) {
-              const drain = Math.min(victim.energy*0.5, g.herb*4.6*Math.sqrt(size));
+              const drain = Math.min(victim.energy*0.5, g.herb*2.4*Math.sqrt(size));
               victim.energy -= drain;
               body.energy += drain*assim - 0.12; ate = true;
               stats.eaten++; stats.fedBy[body.guild]++; ate = true;
@@ -472,8 +474,8 @@ function step() {
             }
           }
         } else if (body.guild === 'sapro') {
-          for (let bi=0; bi<bites; bi++) if (Math.random() < g.sapro*0.55) {
-            const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*16*Math.sqrt(size));
+          for (let bi=0; bi<bites; bi++) {
+            const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*9*Math.sqrt(size));
             corpseFood[tgt] -= drain;
             body.energy += drain*assim; ate = true;
             if (corpseFood[tgt] <= 0.001) { state[tgt]=0; corpseFood[tgt]=0; }

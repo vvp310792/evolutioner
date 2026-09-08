@@ -679,6 +679,7 @@
         if(targets.length){
           const tgt = targets[Math.floor(Math.random()*targets.length)];
           if(body.guild==='pred' && params.predation){
+            ate = true;   // добыча в пределах досягаемости: дерёмся, а не уходим
             for(let bi=0; bi<bites; bi++) if(Math.random() < g.aggression*0.65){
               const victim = bodies.get(owner[tgt]);
               if(victim){
@@ -705,10 +706,15 @@
               }
             }
           } else if(body.guild==='herb'){
-            for(let bi=0; bi<bites; bi++) if(Math.random() < g.herb*0.45){
+            // Дошёл до растения — ест, а не «промахивается». Ген herb задаёт, СКОЛЬКО
+            // откусывают, а не случится ли укус вообще: при herb~0.8 бросок давал 36%,
+            // и в остальные 64% часов травоядное, стоящее вплотную к растению, уходило
+            // прочь от еды, которой касалось. Размер укуса снижен с 4.6 до 2.4 ровно на
+            // тот множитель, на который выросла частота — суммарный пресс прежний.
+            for(let bi=0; bi<bites; bi++){
               const victim = bodies.get(owner[tgt]);
               if(victim){
-                const drain = Math.min(victim.energy*0.5, g.herb*4.6*Math.sqrt(size));
+                const drain = Math.min(victim.energy*0.5, g.herb*2.4*Math.sqrt(size));
                 victim.energy -= drain;
                 body.energy += drain*assim - 0.12;
                 actionCount++; ate = true;
@@ -721,8 +727,8 @@
               }
             }
           } else if(body.guild==='sapro'){
-            for(let bi=0; bi<bites; bi++) if(Math.random() < g.sapro*0.55){
-              const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*16*Math.sqrt(size));
+            for(let bi=0; bi<bites; bi++){
+              const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*9*Math.sqrt(size));
               corpseFood[tgt] -= drain;
               body.energy += drain*assim;
               actionCount++; ate = true;
