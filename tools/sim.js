@@ -7,7 +7,7 @@ const COLS = 46, ROWS = 92, N = COLS * ROWS;
 const idx = (x, y) => y * COLS + x;
 const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
 
-const PHOTO_GAIN = 3.0, MOVE_COST = 0.16, MACRO_MUT_CHANCE = 0.13;
+const PHOTO_GAIN = 3.0, MOVE_COST = 0.10, MACRO_MUT_CHANCE = 0.13;
 const RELEASE = { photo: 2.2, herb: 2.8, pred: 4.2, sapro: 1.8 };
 const SPORE_CAP = 1.0, SPORE_DEPOSIT = 0.06, SPORE_DECAY = 0.996,
       SPORE_THRESHOLD = 0.25, GERMINATE_CHANCE = 0.02;
@@ -63,6 +63,7 @@ function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0
 let stats = freshStats();
 // поклассовый учёт экономики: uni = одноклеточные, multi = достроенные тела >1 клетки
 let acct = { uni:{h:0,cells:0,inc:0,upk:0,kids:0}, multi:{h:0,cells:0,inc:0,upk:0,kids:0} };
+let mv = {herb:{h:0,m:0},pred:{h:0,m:0}};
 let gacct = {}; function gReset(){ gacct = {photo:{h:0,inc:0,upk:0,fed:0},herb:{h:0,inc:0,upk:0,fed:0},pred:{h:0,inc:0,upk:0,fed:0},sapro:{h:0,inc:0,upk:0,fed:0}}; } gReset();
 function acctReset(){ acct = { uni:{h:0,cells:0,inc:0,upk:0,kids:0}, multi:{h:0,cells:0,inc:0,upk:0,kids:0} }; }
 
@@ -413,6 +414,7 @@ function step() {
     { const k = (body.foot.length>1 && size>=body.foot.length) ? acct.multi : (body.foot.length===1 ? acct.uni : null);
       if (k) { k.h++; k.cells += size; k.inc += income; k.upk += upkeep; } }
     { const q = gacct[body.guild]; q.h++; q.inc += income; q.upk += upkeep; }
+    if (mv[body.guild]) mv[body.guild].h++;
     body.energy -= upkeep;
     const eBefore = body.energy;
     if (body.energy <= 0) { for(const i of borderCells) borderMark[i]=0; stats.dStarve++; killBody(body); continue; } // смерть тела целиком: общий пул исчерпан
@@ -464,7 +466,7 @@ function step() {
             if (victim) {
               const drain = Math.min(victim.energy*0.5, g.herb*4.6*Math.sqrt(size));
               victim.energy -= drain;
-              body.energy += drain*assim - 0.12;
+              body.energy += drain*assim - 0.12; ate = true;
               stats.eaten++; stats.fedBy[body.guild]++; ate = true;
               if (victim.energy <= 0) { stats.dPred++; killBody(victim); }
             }
@@ -473,13 +475,16 @@ function step() {
           for (let bi=0; bi<bites; bi++) if (Math.random() < g.sapro*0.55) {
             const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*16*Math.sqrt(size));
             corpseFood[tgt] -= drain;
-            body.energy += drain*assim;
+            body.energy += drain*assim; ate = true;
             if (corpseFood[tgt] <= 0.001) { state[tgt]=0; corpseFood[tgt]=0; }
             stats.fedBy[body.guild]++; ate = true;
           }
         }
-      } else if (body.guild==='herb' || body.guild==='pred') {
-        // добычи рядом нет — жёсткое движение всем телом к ближайшей
+      }
+      // Ищем еду, когда НЕ ПОЕЛИ, а не только когда вокруг вообще пусто. Раньше
+      // движение стояло в ветке else от «есть цель в радиусе 2», а при решётке,
+      // забитой растениями, такого не случается никогда: замерено 0 шагов.
+      if (!ate && (mode===G_HERB || mode===G_PRED)) {
         const seekPred = mode===G_PRED;
         const hx = body.cells[0]%COLS, hy = (body.cells[0]/COLS)|0;
         let found = null;
@@ -502,9 +507,26 @@ function step() {
           }
           sx = body.hx; sy = body.hy;
         }
-        if (moveBody(body, sx, sy)) {
-          body.energy -= MOVE_COST*(0.7+g.moveSpeed*0.6)*size;  // цена шага пропорциональна размеру
+        // Прямой шаг к добыче упирается в неё саму: её клетка занята ею же. Поэтому
+        // пробуем направления по убыванию полезности — организм обходит препятствие,
+        // а не замирает вплотную к еде.
+        const ax = sx || 1, ay = sy || 1;
+        const dirs = [[sx,sy],[sx,0],[0,sy],[sx,-ay],[-ax,sy],[sy,sx],[-sy,-sx],[-ax,-ay]];
+        let stepped = false;
+        for (let di=0; di<dirs.length && !stepped; di++){
+          const ddx = dirs[di][0], ddy = dirs[di][1];
+          if ((ddx || ddy) && moveBody(body, ddx, ddy)) { sx = ddx; sy = ddy; stepped = true; }
+        }
+        if (stepped) {
+          if (mv[body.guild]) mv[body.guild].m++;
+          body.energy -= MOVE_COST*(0.7+g.moveSpeed*0.6)*size;
           moved = true;
+          // быстрые успевают шагнуть дважды за час: иначе moveSpeed влиял только на
+          // цену шага и отбор гнал его к минимуму
+          if (Math.random() < g.moveSpeed-0.5 && moveBody(body, sx, sy)) {
+            if (mv[body.guild]) mv[body.guild].m++;
+            body.energy -= MOVE_COST*0.5*size;
+          }
         } else if (!found) { body.hx = undefined; }
       }
     }
@@ -512,7 +534,10 @@ function step() {
     if (bodies.has(body.id)) gacct[body.guild].fed += Math.max(0, body.energy - eBefore);
     if (!bodies.has(body.id)) continue;
     if (body.energy <= 0) { killBody(body); continue; }
-    if (moved) continue;
+    // Ход больше НЕ отменяет размножение. Пока гетеротрофы ходили редко, это было
+    // безобидно; теперь они ходят почти каждый час, и запрет лишал их размножения
+    // почти полностью — популяции падали вдвое именно из-за него, а не из-за цены шага.
+    void moved;
 
     // ---- рост шаблона, затем размножение ----
     const interiorDiscount = Math.min(0.30, interiorCount*0.04);
@@ -624,7 +649,7 @@ function snapshot() {
            effic: bodies.size? (effSum/bodies.size).toFixed(2):'-', shapes };
 }
 
-module.exports = { reset, step, snapshot, get stats(){ return stats; }, params, bodies, templateOf, tryPlaceBody, founderGenome,
+module.exports = { get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, templateOf, tryPlaceBody, founderGenome,
   get gacct(){ return gacct; }, gReset,
   get acct(){ return acct; }, acctReset,
   get hours(){ return hours; } };

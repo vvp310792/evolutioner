@@ -266,7 +266,7 @@
 
   const params = { hoursPerMinute:24, mutation:0.12, decomp:0.3, predation:true, dayNight:true };
 
-  const PHOTO_GAIN = 3.0, MACRO_MUT_CHANCE = 0.13, MOVE_COST = 0.16;
+  const PHOTO_GAIN = 3.0, MACRO_MUT_CHANCE = 0.13, MOVE_COST = 0.10;
   const RELEASE = { photo:2.2, herb:2.8, pred:4.2, sapro:1.8 };
   const SPORE_CAP = 1.0, SPORE_DEPOSIT = 0.06, SPORE_DECAY = 0.996, SPORE_THRESHOLD = 0.25, GERMINATE_CHANCE = 0.02;
 
@@ -651,7 +651,7 @@
       body.energy -= upkeep;
       if(body.energy <= 0){ killBody(body); continue; }           // гибнет ЦЕЛИКОМ: общий пул исчерпан
 
-      let moved = false;
+      let ate = false, moved = false;
       if(guildIsHetero){
         const processing = 1 + INTERIOR_PROCESS*interiorFrac;
         // итоговая доля усвоения — никогда не больше ASSIM_CAP, то есть всегда < 1
@@ -695,7 +695,7 @@
                   body.energy += (victim.energy*0.75 + vSize*RELEASE[vGuild]*0.75)*assim;
                   flashes.push({i:tgt, life:6});
                   killBody(victim, 0.25);
-                  actionCount++;
+                  actionCount++; ate = true;
                   if(Math.random() < 0.12){
                     logEvent('fight', vGuild==='pred'
                       ? `хищник #${body.lineage} загрыз хищника #${vLid} (каннибализм)`
@@ -711,7 +711,7 @@
                 const drain = Math.min(victim.energy*0.5, g.herb*4.6*Math.sqrt(size));
                 victim.energy -= drain;
                 body.energy += drain*assim - 0.12;
-                actionCount++;
+                actionCount++; ate = true;
                 if(victim.energy <= 0){
                   const vLid = victim.lineage;
                   flashes.push({i:tgt, life:5});
@@ -725,14 +725,19 @@
               const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*16*Math.sqrt(size));
               corpseFood[tgt] -= drain;
               body.energy += drain*assim;
-              actionCount++;
+              actionCount++; ate = true;
               if(corpseFood[tgt] <= 0.001){
                 state[tgt]=0; corpseFood[tgt]=0;
                 if(Math.random() < 0.08) logEvent('graze', `сапротроф #${body.lineage} доразложил труп`);
               }
             }
           }
-        } else if(body.guild==='herb' || body.guild==='pred'){
+        }
+        // Ищем еду, когда НЕ ПОЕЛИ, а не только когда вокруг вообще пусто. Раньше
+        // движение стояло в ветке else от «есть цель в радиусе 2», а при решётке,
+        // забитой растениями, такого не случается никогда — замерено ровно 0 шагов
+        // на 100 тело-часов у обеих подвижных ниш.
+        if(!ate && (mode===G_HERB || mode===G_PRED)){
           // жёсткое движение ВСЕМ телом: форма сохраняется, цена пропорциональна размеру
           const seekPred = mode===G_PRED;
           const hx = body.cells[0]%COLS, hy = (body.cells[0]/COLS)|0;
@@ -756,16 +761,32 @@
             }
             sx=body.hx; sy=body.hy;
           }
-          if(moveBody(body, sx, sy)){
+          // Прямой шаг к добыче упирается в неё саму: её клетка занята ею же. Поэтому
+          // пробуем направления по убыванию полезности — организм обходит препятствие,
+          // а не замирает вплотную к еде.
+          const ax = sx || 1, ay = sy || 1;
+          const dirs = [[sx,sy],[sx,0],[0,sy],[sx,-ay],[-ax,sy],[sy,sx],[-sy,-sx],[-ax,-ay]];
+          let stepped = false;
+          for(let di=0; di<dirs.length && !stepped; di++){
+            const ddx = dirs[di][0], ddy = dirs[di][1];
+            if((ddx || ddy) && moveBody(body, ddx, ddy)){ sx = ddx; sy = ddy; stepped = true; }
+          }
+          if(stepped){
             body.energy -= MOVE_COST*(0.7+g.moveSpeed*0.6)*size;
             moved = true;
+            // быстрые успевают шагнуть дважды за час: иначе moveSpeed влиял только на
+            // цену шага, и отбор гнал его к минимуму
+            if(Math.random() < g.moveSpeed-0.5 && moveBody(body, sx, sy)) body.energy -= MOVE_COST*0.5*size;
           } else if(!found) body.hx = undefined;
         }
       }
 
       if(!bodies.has(body.id)) continue;
       if(body.energy <= 0){ killBody(body); continue; }
-      if(moved) continue;
+      // Ход больше НЕ отменяет размножение. Пока гетеротрофы ходили редко, это было
+      // безобидно; теперь они ходят почти каждый час, и запрет лишал их размножения
+      // почти полностью — популяции падали вдвое именно из-за него, а не из-за цены шага.
+      void moved;
 
       const interiorDiscount = Math.min(0.30, interiorCount*0.04);
       const perChildCost = g.thresh * g.costFrac * (1-interiorDiscount);
