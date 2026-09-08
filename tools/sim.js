@@ -28,6 +28,10 @@ const ASSIM_CAP = 0.9;
 const ASSIM_BASE = { herb: 0.70, pred: 0.88, sapro: 0.80 };
 const GROWTH_COST_FRAC = 0.20;  // вырастить свою клетку много дешевле, чем снарядить потомка
 const AGE_SCALE = Math.sqrt;
+const GRAZE_LEFT = 0.12;   // от съеденного растения остаётся лишь остаток
+
+const SAT = 1.0;   // насколько час кормёжки должен окупать расходы, чтобы остаться на месте
+const HFRAC = 0.35, HCAP = 8, HMIN = 0.4;   // доля от энергии растения, потолок, абсолютный минимум укуса
     // старение растёт с размером тела, но не линейно  // вырастить свою клетку дешевле, чем породить организм  // внутренние перерабатывают добытое барьером
 
 const GENES = ['metab','effic','thresh','costFrac','minN','maxN','aggression','armor',
@@ -64,7 +68,7 @@ function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0
 let stats = freshStats();
 // поклассовый учёт экономики: uni = одноклеточные, multi = достроенные тела >1 клетки
 let acct = { uni:{h:0,cells:0,inc:0,upk:0,kids:0}, multi:{h:0,cells:0,inc:0,upk:0,kids:0} };
-let mv = {herb:{h:0,m:0},pred:{h:0,m:0}};
+let mv = {herb:{h:0,m:0,try:0},pred:{h:0,m:0,try:0}};
 let gacct = {}; function gReset(){ gacct = {photo:{h:0,inc:0,upk:0,fed:0},herb:{h:0,inc:0,upk:0,fed:0},pred:{h:0,inc:0,upk:0,fed:0},sapro:{h:0,inc:0,upk:0,fed:0}}; } gReset();
 function acctReset(){ acct = { uni:{h:0,cells:0,inc:0,upk:0,kids:0}, multi:{h:0,cells:0,inc:0,upk:0,kids:0} }; }
 
@@ -424,6 +428,7 @@ function step() {
     let ate = false, moved = false;
     if (body.guild !== 'photo') {
       const processing = 1 + INTERIOR_PROCESS * interiorFrac;
+      let gained = 0;   // сколько энергии дал этот час кормёжки
       // итоговая доля усвоения — никогда не больше ASSIM_CAP, то есть всегда < 1
       const assim = Math.min(ASSIM_CAP, ASSIM_BASE[body.guild] * g.effic * processing);
       // Ниша соседа берётся из cellGuild, а не из bodies.get(): три замыкания-предиката
@@ -466,23 +471,43 @@ function step() {
           for (let bi=0; bi<bites; bi++) {
             const victim = bodies.get(owner[tgt]);
             if (victim) {
-              const drain = Math.min(victim.energy*0.5, g.herb*2.4*Math.sqrt(size));
+              // Укус — ДОЛЯ энергии растения, а не фиксированная величина. С жёстким потолком
+              // herb*2.4 травоядное снимало одинаково и с голодного, и с жирного растения:
+              // замерено 0.95 против 0.98 на тело-час при полуторакратной разнице в доходе
+              // растений. Поэтому рост первичной продукции (например, круглосуточный свет)
+              // никак не доходил до травоядных, и мир вырождался в монокультуру.
+              // Доля даёт крупный кусок с жирного растения, абсолютный минимум —
+              // добивает слабое. Без минимума укус лишь «стрижёт»: замерено, что за
+              // 20 000 часов травоядные убили ТРИ растения, место не освобождалось
+              // вовсе, решётка стояла забитой на 87%, и все умирали от старости.
+              const bite = Math.min(0.55, g.herb*HFRAC);
+              let drain = Math.max(victim.energy*bite, g.herb*HMIN);
+              drain = Math.min(drain, victim.energy, g.herb*HCAP*Math.sqrt(size));
               victim.energy -= drain;
-              body.energy += drain*assim - 0.12; ate = true;
+              body.energy += drain*assim - 0.12; gained += drain*assim; ate = true;
               stats.eaten++; stats.fedBy[body.guild]++; ate = true;
-              if (victim.energy <= 0) { stats.dPred++; killBody(victim); }
+              // Съеденное растение оставляет лишь остаток, а не полноценный труп: его ведь
+              // съели. С полным трупом выходило наоборот — чем активнее травоядные едят,
+              // тем плотнее заваливают чашку непроходимыми останками (абиотический распад
+              // 0.0025/час, труп лежит сотни часов), и место под потомство не открывалось.
+              if (victim.energy <= 0) { stats.dPred++; killBody(victim, GRAZE_LEFT); }
             }
           }
         } else if (body.guild === 'sapro') {
           for (let bi=0; bi<bites; bi++) {
             const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*9*Math.sqrt(size));
             corpseFood[tgt] -= drain;
-            body.energy += drain*assim; ate = true;
+            body.energy += drain*assim; gained += drain*assim; ate = true;
             if (corpseFood[tgt] <= 0.001) { state[tgt]=0; corpseFood[tgt]=0; }
             stats.fedBy[body.guild]++; ate = true;
           }
         }
       }
+      // Травоядное уходит не когда еды нет вовсе, а когда ПАСТБИЩЕ ВЫЕДЕНО: час
+      // кормёжки не окупил даже собственных расходов. Иначе в мире, забитом
+      // растениями, еда всегда под боком и трогаться с места незачем — замерено
+      // 0.2-1.3 шага на 100 тело-часов при 93% занятости решётки.
+      if (mode === G_HERB && gained < upkeep*SAT) ate = false;
       // Ищем еду, когда НЕ ПОЕЛИ, а не только когда вокруг вообще пусто. Раньше
       // движение стояло в ветке else от «есть цель в радиусе 2», а при решётке,
       // забитой растениями, такого не случается никогда: замерено 0 шагов.
@@ -512,6 +537,7 @@ function step() {
         // Прямой шаг к добыче упирается в неё саму: её клетка занята ею же. Поэтому
         // пробуем направления по убыванию полезности — организм обходит препятствие,
         // а не замирает вплотную к еде.
+        if (mv[body.guild]) mv[body.guild].try++;
         const ax = sx || 1, ay = sy || 1;
         const dirs = [[sx,sy],[sx,0],[0,sy],[sx,-ay],[-ax,sy],[sy,sx],[-sy,-sx],[-ax,-ay]];
         let stepped = false;
