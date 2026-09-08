@@ -71,6 +71,12 @@
   .field label b{color:var(--ink); font-weight:600;}
   input[type=range]{-webkit-appearance:none; width:100%; height:4px; background:var(--line); border-radius:2px; outline:none;}
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--accent); cursor:pointer; margin-top:-6px; box-shadow:0 0 8px rgba(88,224,201,0.6);}
+  .scalenote{font-size:10px; line-height:1.35; margin-top:4px; color:var(--ink-dim);}
+  .scalenote b{font-weight:600;}
+  .scalenote.good b{color:#4ade80;}
+  .scalenote.warn b{color:#facc15;}
+  .scalenote.bad  b{color:#ff5c7a;}
+  .scaleopt{color:#6d7d99;}
   input[type=number]{background:#081011; border:1px solid var(--line); color:var(--ink); border-radius:6px; padding:7px 8px; font-family:inherit; width:100%; font-size:14px;}
 
   .checkrow{display:flex; align-items:center; gap:8px; font-size:11px; color:var(--ink-dim);}
@@ -159,22 +165,26 @@
   <button id="btnSeed">Подсадить ещё фототрофов</button>
 
   <div class="panel">
-    <h3>Параметры (заданы оптимально по умолчанию)</h3>
+    <h3>Параметры</h3>
+    <div class="scalenote scaleopt">Зелёная часть шкалы — измеренный оптимум, жёлтая — рабочая, но перекошенная область, красная — гибель. За оптимум выходить можно и нужно: именно так видно, чем он держится.</div>
     <div class="field">
       <label>Скорость времени <b id="lblSpeed">24 ч/мин</b></label>
       <input type="range" id="speed" min="0" max="100" value="46">
     </div>
     <div class="field">
       <label>Сила мутации <b id="lblMut">12%</b></label>
-      <input type="range" id="mutation" min="0" max="60" value="12">
+      <input type="range" id="mutation" min="0" max="100" value="12">
+      <div class="scalenote" id="noteMut"></div>
     </div>
     <div class="field">
       <label>Освещённость <b id="lblLight">0.62</b></label>
       <input type="range" id="light" min="15" max="150" value="62">
+      <div class="scalenote" id="noteLight"></div>
     </div>
     <div class="field">
       <label>Скорость разложения <b id="lblRegen">0.30</b></label>
-      <input type="range" id="regen" min="5" max="60" value="30">
+      <input type="range" id="regen" min="5" max="90" value="30">
+      <div class="scalenote" id="noteRegen"></div>
     </div>
     <div class="field">
       <label>Фототрофов-основателей</label>
@@ -345,6 +355,48 @@
                   photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150 };
   const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
   const SHAPE_NAMES = ['квадрат','прямоугольник','круг','овал'];
+
+  // Границы зон взяты из перебора прогонами (по 2 запуска на точку, 20 000 часов),
+  // а не назначены на глаз. Красная зона — там, где замерено вымирание или развал
+  // цепи; зелёная — где держатся все четыре ниши, дифференцировка и движение.
+  const SCALES = {
+    light: { el:'light', note:'noteLight', div:100, opt:[0.56,0.70], zones:[
+      [0.15,0.52,'bad', 'ниже порога жизни', 'фотосинтез не покрывает расходы — вымирание за 2–20 дней'],
+      [0.52,0.56,'warn','на грани',          'держится, но в части прогонов чашка всё же вымирает'],
+      [0.56,0.70,'good','оптимум',           'полная цепь, дифференцировка до 35, движение 26–34 шага/100ч'],
+      [0.70,1.50,'warn','избыток света',     'жизни много, но дифференцировка исчезает и движение затухает'],
+    ]},
+    mutation: { el:'mutation', note:'noteMut', div:100, opt:[0.10,0.32], zones:[
+      [0.00,0.02,'bad', 'эволюция остановлена','новые ниши не появляются вовсе, мир застывает'],
+      [0.02,0.10,'warn','медленная',           'цепь есть, но тела редки и мелкие'],
+      [0.10,0.32,'good','оптимум',             'цепь и многоклеточность держатся вместе'],
+      [0.32,1.00,'warn','мир тел',             'дифференцированных втрое больше, но цепь чахнет'],
+    ]},
+    decomp: { el:'regen', note:'noteRegen', div:100, opt:[0.20,0.45], zones:[
+      [0.05,0.12,'bad', 'засор',    'чашка тонет в трупах: сапротрофы не могут есть и вымирают, следом хищники'],
+      [0.12,0.20,'warn','медленное','трупов много, но цепь держится'],
+      [0.20,0.45,'good','оптимум',  'трупов около 500, полная цепь'],
+      [0.45,0.90,'warn','быстрое',  'сапротрофов больше всех, трупов мало, тела мельче'],
+    ]},
+  };
+  const ZONE_COLOR = { bad:'rgba(255,92,122,0.45)', warn:'rgba(250,204,21,0.32)', good:'rgba(74,222,128,0.55)' };
+
+  function paintScale(key){
+    const sc = SCALES[key];
+    const inp = document.getElementById(sc.el), note = document.getElementById(sc.note);
+    if(!inp || !note) return;
+    const lo = +inp.min / sc.div, hi = +inp.max / sc.div, span = hi - lo;
+    const stops = sc.zones.map(([a,b,cls]) => {
+      const p1 = clamp((a-lo)/span,0,1)*100, p2 = clamp((b-lo)/span,0,1)*100;
+      return `${ZONE_COLOR[cls]} ${p1.toFixed(2)}%, ${ZONE_COLOR[cls]} ${p2.toFixed(2)}%`;
+    }).join(', ');
+    inp.style.background = `linear-gradient(to right, ${stops})`;
+    const v = +inp.value / sc.div;
+    const z = sc.zones.find(([a,b]) => v >= a && v <= b) || sc.zones[sc.zones.length-1];
+    note.className = 'scalenote ' + z[2];
+    note.innerHTML = `<b>${z[3]}</b> — ${z[4]}<br><span class="scaleopt">оптимум ${sc.opt[0].toFixed(2)}–${sc.opt[1].toFixed(2)}</span>`;
+  }
+  function paintAllScales(){ for(const k of Object.keys(SCALES)) paintScale(k); }
 
   // ─── Геометрия
   const noff = [];  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) if(dx||dy) noff.push([dx,dy]);
@@ -1228,14 +1280,17 @@
   document.getElementById('mutation').addEventListener('input', e=>{
     params.mutation = parseInt(e.target.value,10)/100;
     document.getElementById('lblMut').textContent = e.target.value+'%';
+    paintScale('mutation');
   });
   document.getElementById('light').addEventListener('input', e=>{
     params.light = parseInt(e.target.value,10)/100;
     document.getElementById('lblLight').textContent = params.light.toFixed(2);
+    paintScale('light');
   });
   document.getElementById('regen').addEventListener('input', e=>{
     params.decomp = parseInt(e.target.value,10)/100;
     document.getElementById('lblRegen').textContent = params.decomp.toFixed(2);
+    paintScale('decomp');
   });
   document.getElementById('predation').addEventListener('change', e=>{ params.predation = e.target.checked; });
   document.getElementById('daynight').addEventListener('change', e=>{ params.dayNight = e.target.checked; });
@@ -1260,6 +1315,7 @@
   document.getElementById('speed').value = sliderFromSpeed(params.hoursPerMinute);
   document.getElementById('lblSpeed').textContent = params.hoursPerMinute.toLocaleString('ru-RU')+' ч/мин';
 
+  paintAllScales();
   reset();
   requestAnimationFrame(loop);
 })();
