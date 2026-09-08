@@ -17,6 +17,15 @@ const BORDER_SYNTH = 0.75;      // барьерная клетка хуже си
 const INTERIOR_SYNTH = 3.00;    // внутренняя — лучше
 const BORDER_ARMOR_BONUS = 0.45;// барьерная лучше защищает
 const INTERIOR_PROCESS = 0.35;
+// Усвоение — всегда ДОЛЯ съеденного, строго меньше единицы: часть энергии жертвы
+// теряется, как и положено при переходе на следующий трофический уровень.
+// Раньше коэффициент был 0.8*effic*processing и при effic до 1.6 доходил до 1.73 —
+// травоядное извлекало из растения БОЛЬШЕ, чем отнимало, энергия бралась из ничего,
+// и отбор гнал effic к максимуму именно из-за этого.
+const ASSIM_CAP = 0.9;
+// Порядок величин как в природе: растительная масса усваивается хуже мяса,
+// детрит — между ними. Все три строго меньше единицы.
+const ASSIM_BASE = { herb: 0.70, pred: 0.88, sapro: 0.80 };
 const GROWTH_COST_FRAC = 0.20;  // вырастить свою клетку много дешевле, чем снарядить потомка
 const AGE_SCALE = Math.sqrt;    // старение растёт с размером тела, но не линейно  // вырастить свою клетку дешевле, чем породить организм  // внутренние перерабатывают добытое барьером
 
@@ -24,7 +33,7 @@ const GENES = ['metab','effic','thresh','costFrac','minN','maxN','aggression','a
                'photo','herb','sapro','cycleHours','moveSpeed','lifespan','broodSize',
                'shapeType','shapeA','shapeB'];
 const RANGE = {
-  metab:[0.15,1.7], effic:[0.3,1.6], thresh:[4,40], costFrac:[0.2,0.9],
+  metab:[0.15,1.7], effic:[0.35,1.0], thresh:[4,40], costFrac:[0.2,0.9],
   minN:[0,4], maxN:[1,8], aggression:[0,1], armor:[0,1], photo:[0,1], herb:[0,1],
   sapro:[0,1], cycleHours:[4,1200], moveSpeed:[0.15,1], lifespan:[100,12000],
   broodSize:[1,4], shapeType:[0,3], shapeA:[1,5], shapeB:[1,5],
@@ -293,7 +302,7 @@ function mutateGenome(pg, wasPred) {
 
 function founderGenome() {
   return {
-    metab: 0.22+Math.random()*0.32, effic: 0.85+Math.random()*0.3,
+    metab: 0.22+Math.random()*0.32, effic: 0.55+Math.random()*0.25,
     thresh: 7+Math.random()*7, costFrac: 0.35+Math.random()*0.2,
     minN: Math.floor(Math.random()*2), maxN: 3+Math.floor(Math.random()*5),
     aggression: 0.02+Math.random()*0.06, armor: 0.02+Math.random()*0.06,
@@ -412,6 +421,8 @@ function step() {
     let ate = false, moved = false;
     if (body.guild !== 'photo') {
       const processing = 1 + INTERIOR_PROCESS * interiorFrac;
+      // итоговая доля усвоения — никогда не больше ASSIM_CAP, то есть всегда < 1
+      const assim = Math.min(ASSIM_CAP, ASSIM_BASE[body.guild] * g.effic * processing);
       // Ниша соседа берётся из cellGuild, а не из bodies.get(): три замыкания-предиката
       // пересоздавались на КАЖДОЕ тело КАЖДЫЙ час и стоили ~7% профиля.
       const myId = body.id, mode = GCODE[body.guild];
@@ -442,8 +453,8 @@ function step() {
               const def = (victim.energy/vSize) * (0.5+effArmor) * (0.75+Math.random()*0.5);
               if (atk > def) {
                 // барьер пробит -> тело гибнет целиком (п.4)
-                body.energy += (victim.energy*0.6 + vSize*RELEASE[victim.guild]*0.6) * g.effic * processing;
-                stats.dPred++; killBody(victim, 0.4); stats.eaten++; stats.fedBy[body.guild]++; ate = true;
+                body.energy += (victim.energy*0.75 + vSize*RELEASE[victim.guild]*0.75) * assim;
+                stats.dPred++; killBody(victim, 0.25); stats.eaten++; stats.fedBy[body.guild]++; ate = true;
               }
             }
           }
@@ -451,18 +462,18 @@ function step() {
           for (let bi=0; bi<bites; bi++) if (Math.random() < g.herb*0.45) {
             const victim = bodies.get(owner[tgt]);
             if (victim) {
-              const drain = Math.min(victim.energy*0.4, g.herb*2.6*Math.sqrt(size));
+              const drain = Math.min(victim.energy*0.5, g.herb*4.6*Math.sqrt(size));
               victim.energy -= drain;
-              body.energy += drain*0.8*g.effic*processing - 0.12;
+              body.energy += drain*assim - 0.12;
               stats.eaten++; stats.fedBy[body.guild]++; ate = true;
               if (victim.energy <= 0) { stats.dPred++; killBody(victim); }
             }
           }
         } else if (body.guild === 'sapro') {
           for (let bi=0; bi<bites; bi++) if (Math.random() < g.sapro*0.55) {
-            const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*11*Math.sqrt(size));
+            const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*16*Math.sqrt(size));
             corpseFood[tgt] -= drain;
-            body.energy += drain*0.85*g.effic*processing;
+            body.energy += drain*assim;
             if (corpseFood[tgt] <= 0.001) { state[tgt]=0; corpseFood[tgt]=0; }
             stats.fedBy[body.guild]++; ate = true;
           }

@@ -277,6 +277,15 @@
   const INTERIOR_SYNTH = 3.00;    // внутренняя лучше
   const BORDER_ARMOR_BONUS = 0.45;// барьерная лучше защищает
   const INTERIOR_PROCESS = 0.35;  // внутренние перерабатывают добытое барьером
+  // Усвоение — всегда ДОЛЯ съеденного, строго меньше единицы: часть энергии жертвы
+  // теряется, как и положено при переходе на следующий трофический уровень. Раньше
+  // коэффициент был 0.8*effic*processing и при effic до 1.6 доходил до 1.73 —
+  // травоядное извлекало из растения БОЛЬШЕ, чем отнимало у него, энергия бралась
+  // из ничего, и отбор гнал effic к максимуму именно из-за этого.
+  // Порядок величин как в природе: растительная масса усваивается хуже мяса,
+  // детрит — между ними.
+  const ASSIM_CAP = 0.9;
+  const ASSIM_BASE = { herb: 0.70, pred: 0.88, sapro: 0.80 };
   const GROWTH_COST_FRAC = 0.20;  // вырастить свою клетку много дешевле, чем снарядить потомка
   const AGE_SCALE = Math.sqrt;    // старение растёт с размером тела, но не линейно
 
@@ -288,7 +297,7 @@
     ['aggression', 'хищность',        0,1,      'Шанс атаки (× 0.65) и сила удара (0.6 + aggression × 1.15). Хищники едят и травоядных, и друг друга.'],
     ['sapro',      'сапротрофия',     0,1,      'Шанс поедания трупа (sapro × 0.55) и объём (sapro × скорость разложения × 8).'],
     ['armor',      'броня',           0,1,      'Защита в бою (0.5 + armor). Барьерные клетки тела получают надбавку +0.45. Стоит 0.03 апкипа на клетку.'],
-    ['effic',      'усвоение пищи',   0.3,1.6,  'Множитель на всё, что получено из еды. Только для гетеротрофов: у фототрофа эту роль играет сам ген photo. Стоит 0.05 апкипа на клетку.'],
+    ['effic',      'усвоение пищи',   0.35,1.0, 'Какая ДОЛЯ съеденного становится своей энергией. Всегда меньше единицы: остальное теряется при переходе на следующий трофический уровень. Только для гетеротрофов — у фототрофа эту роль играет сам ген photo. Стоит 0.05 апкипа на клетку.'],
     ['metab',      'обмен веществ',   0.15,1.7, 'Базовый расход энергии на каждую клетку тела каждый час.'],
     ['lifespan',   'предел жизни',    100,12000,'Возраст в часах, после которого тело гибнет целиком. Он же знаменатель старения: 0.4 / max(200, lifespan).'],
     ['cycleHours', 'цикл деления',    4,1200,   'Часы между помётами. Таймер, а не вероятность: так отбор не штрафует быстрое деление косвенно.'],
@@ -531,7 +540,7 @@
 
   function founderGenome(){
     return {
-      metab: 0.22+Math.random()*0.32, effic: 0.85+Math.random()*0.3,
+      metab: 0.22+Math.random()*0.32, effic: 0.55+Math.random()*0.25,
       thresh: 7+Math.random()*7, costFrac: 0.35+Math.random()*0.2,
       minN: Math.floor(Math.random()*2), maxN: 3+Math.floor(Math.random()*5),
       aggression: 0.02+Math.random()*0.06, armor: 0.02+Math.random()*0.06,
@@ -645,6 +654,8 @@
       let moved = false;
       if(guildIsHetero){
         const processing = 1 + INTERIOR_PROCESS*interiorFrac;
+        // итоговая доля усвоения — никогда не больше ASSIM_CAP, то есть всегда < 1
+        const assim = Math.min(ASSIM_CAP, ASSIM_BASE[body.guild] * g.effic * processing);
         // Кормится КАЖДАЯ барьерная клетка. Раньше тело делало один укус в час
         // независимо от размера, и гетеротрофы не выходили на безубыточность.
         const bites = Math.min(borderCells.length, 6);
@@ -681,9 +692,9 @@
                   // барьер пробит -> тело жертвы гибнет целиком; хищник съедает и биомассу,
                   // поэтому от съеденного остаётся неполный труп (иначе вещество считалось бы дважды)
                   const vGuild = victim.guild, vLid = victim.lineage;
-                  body.energy += (victim.energy*0.6 + vSize*RELEASE[vGuild]*0.6)*g.effic*processing;
+                  body.energy += (victim.energy*0.75 + vSize*RELEASE[vGuild]*0.75)*assim;
                   flashes.push({i:tgt, life:6});
-                  killBody(victim, 0.4);
+                  killBody(victim, 0.25);
                   actionCount++;
                   if(Math.random() < 0.12){
                     logEvent('fight', vGuild==='pred'
@@ -697,9 +708,9 @@
             for(let bi=0; bi<bites; bi++) if(Math.random() < g.herb*0.45){
               const victim = bodies.get(owner[tgt]);
               if(victim){
-                const drain = Math.min(victim.energy*0.4, g.herb*2.6*Math.sqrt(size));
+                const drain = Math.min(victim.energy*0.5, g.herb*4.6*Math.sqrt(size));
                 victim.energy -= drain;
-                body.energy += drain*0.8*g.effic*processing - 0.12;
+                body.energy += drain*assim - 0.12;
                 actionCount++;
                 if(victim.energy <= 0){
                   const vLid = victim.lineage;
@@ -711,9 +722,9 @@
             }
           } else if(body.guild==='sapro'){
             for(let bi=0; bi<bites; bi++) if(Math.random() < g.sapro*0.55){
-              const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*11*Math.sqrt(size));
+              const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*16*Math.sqrt(size));
               corpseFood[tgt] -= drain;
-              body.energy += drain*0.85*g.effic*processing;
+              body.energy += drain*assim;
               actionCount++;
               if(corpseFood[tgt] <= 0.001){
                 state[tgt]=0; corpseFood[tgt]=0;
@@ -1087,11 +1098,14 @@
       // цикл иначе занимает поток целиком, страница перестаёт отвечать (замерено:
       // 0 кадров в секунду), и ни кнопки, ни ползунки не работают. Недостижимую
       // скорость всё равно не выдать, но интерфейс обязан оставаться живым.
+      // Время проверяется КАЖДЫЙ шаг, а не раз в 64: один шаг стоит около 2 мс, и
+      // пачка успевала разогнаться до ~134 мс до первой проверки — страница выдавала
+      // 4 кадра в секунду вместо 60. Сам вызов performance.now() на фоне шага бесплатен.
       const budgetEnd = performance.now() + 12;
       let done = 0;
       while(done < steps){
         step(); done++;
-        if((done & 63) === 0 && performance.now() > budgetEnd) break;
+        if(performance.now() > budgetEnd) break;
       }
       hourBudget -= done;
       if(hourBudget > params.hoursPerMinute) hourBudget = params.hoursPerMinute;  // не копим долг
