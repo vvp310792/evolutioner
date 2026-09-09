@@ -195,6 +195,10 @@
       <span><b>Хищничество</b> — без него ниша хищника нежизнеспособна</span>
     </div>
     <div class="checkrow">
+      <input type="checkbox" id="sexrepro" checked>
+      <span><b>Половое размножение</b> — ген «половое размн.» перестаёт работать, всё потомство клональное</span>
+    </div>
+    <div class="checkrow">
       <input type="checkbox" id="daynight" checked>
       <span><b>Смена дня и ночи</b> — сутки фиксированы, 24 часа</span>
     </div>
@@ -288,7 +292,7 @@
   // логика водной толщи, снятой сбоку: нижняя треть пустовала. Неоднородность дают
   // дрейфующие пятна плодородия. Значение 0.62 подобрано прогонами: при 0.66 растений
   // слишком много и дифференцировка падает, при 0.52 случается вымирание.
-  const params = { hoursPerMinute:24, mutation:0.12, decomp:0.3, light:0.62, predation:true, dayNight:true };
+  const params = { hoursPerMinute:24, mutation:0.12, decomp:0.3, light:0.62, predation:true, dayNight:true, sexReprod:true };
 
   const PHOTO_GAIN = 3.0, MACRO_MUT_CHANCE = 0.13, MOVE_COST = 0.10;
   const RELEASE = { photo:2.2, herb:2.8, pred:4.2, sapro:1.8 };
@@ -351,6 +355,7 @@
     if(key==='sapro') return guild==='sapro';
     if(key==='effic') return guild!=='photo';          // у фототрофа усвоение играет сам ген photo
     if(key==='moveSpeed') return guild==='herb' || guild==='pred';   // photo и sapro сидячие
+    if(key==='sexual') return params.sexReprod;   // при выключенной галочке ген не работает вовсе
     return true;
   }
   const RANGE = {}; GENE_INFO.forEach(g=> RANGE[g[0]] = [g[2],g[3]]);
@@ -615,7 +620,7 @@
     // старте пол выигрывает (1741 против 1210 к 30 000 ч), но одинокому мутанту не с
     // кем скрещиваться. Поэтому первый половой потомок сразу получает выводок побольше
     // и запас, чтобы вокруг него возникла группа партнёров, а не одиночка.
-    if(g.sexual >= 0.5 && pg.sexual < 0.15){
+    if(params.sexReprod && g.sexual >= 0.5 && pg.sexual < 0.15){
       g.broodSize = Math.max(g.broodSize, 3);
       g.__endow = Math.max(g.__endow, 10);
     }
@@ -955,7 +960,7 @@
 
       // Половое размножение: партнёр той же ниши, совместимый, сам готовый.
       let mate = null;
-      if(Math.random() < g.sexual){
+      if(params.sexReprod && Math.random() < g.sexual){
         const hx0 = body.cells[0]%COLS, hy0 = (body.cells[0]/COLS)|0;
         for(let so=0; so<senseOffsets.length && !mate; so++){
           const nx = hx0+senseOffsets[so][0], ny = hy0+senseOffsets[so][1];
@@ -1355,6 +1360,10 @@
     paintScale('decomp');
   });
   document.getElementById('predation').addEventListener('change', e=>{ params.predation = e.target.checked; });
+  document.getElementById('sexrepro').addEventListener('change', e=>{
+    params.sexReprod = e.target.checked;
+    updateStats();   // чтобы инспектор сразу перерисовал ген как неработающий
+  });
   document.getElementById('daynight').addEventListener('change', e=>{ params.dayNight = e.target.checked; });
 
   canvas.addEventListener('click', e=>{

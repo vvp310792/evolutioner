@@ -61,7 +61,7 @@ let bodies = new Map();
 let nextBodyId = 1, nextLineageId = 1;
 let hours = 0, phaseX = 0, phaseY = 0, dayFactor = 1;
 const order = [];   // переиспользуемый буфер обхода тел
-let params = { mutation: 0.12, decomp: 0.3, light: 0.62, predation: true, dayNight: true };
+let params = { mutation: 0.12, decomp: 0.3, light: 0.62, predation: true, dayNight: true, sexReprod: true };
 function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0,
   dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0,
   bornBy:{photo:0,herb:0,pred:0,sapro:0}, diedBy:{photo:0,herb:0,pred:0,sapro:0},
@@ -321,7 +321,7 @@ function mutateGenome(pg, wasPred) {
   // старте пол выигрывает (1741 против 1210 к 30 000 ч), но одинокому мутанту не с
   // кем скрещиваться. Поэтому первый половой потомок сразу получает выводок побольше
   // и запас, чтобы вокруг него возникла группа совместимых партнёров, а не одиночка.
-  if (g.sexual >= 0.5 && pg.sexual < 0.15) {
+  if (params.sexReprod && g.sexual >= 0.5 && pg.sexual < 0.15) {
     g.broodSize = Math.max(g.broodSize, 3);
     g.__endow = Math.max(g.__endow || 0, 10);
   }
@@ -663,7 +663,7 @@ function step() {
     // в этот час. Отсюда требование к продолжительности жизни: короткоживущая
     // половая линия просто не доживает до встречи.
     let mate = null;
-    if (Math.random() < g.sexual) {
+    if (params.sexReprod && Math.random() < g.sexual) {
       const hx0 = body.cells[0]%COLS, hy0 = (body.cells[0]/COLS)|0;
       for (let so=0; so<senseOffsets.length && !mate; so++) {
         const nx = hx0+senseOffsets[so][0], ny = hy0+senseOffsets[so][1];
