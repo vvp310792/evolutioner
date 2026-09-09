@@ -213,6 +213,8 @@
       <div class="stat"><span class="k">Многоклеточных</span><span class="v" id="sBodies">0</span></div>
       <div class="stat"><span class="k">Крупнейшее тело</span><span class="v" id="sMaxBody">0</span></div>
       <div class="stat"><span class="k">Дифференцировано</span><span class="v" id="sDiff">0</span></div>
+      <div class="stat"><span class="k">Половых линий</span><span class="v" id="sSex">0</span></div>
+      <div class="stat"><span class="k">Рождений от пола</span><span class="v" id="sSexB">0</span></div>
       <div class="stat wide"><span class="k">Освещённость</span><span class="v" id="sLight">–</span></div>
       <div class="stat wide">
         <span class="k">Трофическая пирамида</span>
@@ -275,7 +277,7 @@
   let bodies = new Map();               // id -> организм (см. tryPlaceBody)
   let nextBodyId = 1, nextLineageId = 1;
 
-  let hours = 0, extinctCount = 0, actionCount = 0, moveCount = 0, sporeGermCount = 0;
+  let hours = 0, extinctCount = 0, actionCount = 0, moveCount = 0, sporeGermCount = 0, sexBirths = 0;
   let popHistory = [], knownLineages = new Set(), lineageHueJitter = {};
   let flashes = [], allExtinctNotified = false;
   let phaseX = 0, phaseY = 0, dayFactor = 1;
@@ -335,6 +337,7 @@
     ['shapeType',  'тип формы',       0,3,      'План тела: 0 квадрат, 1 прямоугольник, 2 круг, 3 овал. План — намерение: тело строит из него то, что успело занять.'],
     ['shapeA',     'размер А',        1,5,      'Сторона квадрата, ширина прямоугольника, радиус круга, большая полуось овала.'],
     ['shapeB',     'размер Б',        1,5,      'Высота прямоугольника и малая полуось овала. У квадрата и круга не используется.'],
+    ['sexual',     'половое размн.',  0,1,      'Склонность искать партнёра вместо клонирования. Потомок получает каждый ген от одного из двух родителей броском монеты. Партнёр обязан быть той же ниши и генетически близким — отдельного поля «вид» в коде нет, расхождение по пищевым генам само разводит линии. Не дождавшись партнёра за 48 часов, организм размножается клонально.'],
   ];
   const GENES = GENE_INFO.map(g=>g[0]);
   // Какие гены реально работают у данной ниши. Ген photo у травоядного унаследован
@@ -352,7 +355,7 @@
   }
   const RANGE = {}; GENE_INFO.forEach(g=> RANGE[g[0]] = [g[2],g[3]]);
   const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
-                  photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150 };
+                  photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25 };
   const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
   const SHAPE_NAMES = ['квадрат','прямоугольник','круг','овал'];
 
@@ -479,6 +482,24 @@
     }
   }
 
+  // Партнёр должен быть той же ниши и генетически близким. Отдельного поля «вид» нет:
+  // расхождение по пищевым генам само разводит линии на нескрещивающиеся группы.
+  const SPECIES_GAP = 0.30, MATE_PATIENCE = 48;
+  function compatible(a, b){
+    if(a.guild !== b.guild) return false;
+    const x = a.g, y = b.g;
+    return Math.abs(x.photo-y.photo) <= SPECIES_GAP && Math.abs(x.herb-y.herb) <= SPECIES_GAP
+        && Math.abs(x.aggression-y.aggression) <= SPECIES_GAP && Math.abs(x.sapro-y.sapro) <= SPECIES_GAP;
+  }
+  // Каждый ген потомка берётся от одного из двух родителей броском монеты, и только
+  // потом накладывается обычная мутация. В этом и весь смысл пола: удачные сочетания,
+  // собранные из разных линий, а не медленный дрейф одной.
+  function recombine(ga, gb){
+    const g = {};
+    for(const k of GENES) g[k] = Math.random() < 0.5 ? ga[k] : gb[k];
+    return g;
+  }
+
   function guildOfGenome(g){
     let best='photo', bv=g.photo;
     if(g.herb>bv){ best='herb'; bv=g.herb; }
@@ -589,6 +610,15 @@
       g.maxN = Math.max(g.maxN, g.minN+1);
     }
     g.__endow = 0;
+    // Пакет ОСНОВАНИЯ ПОЛОВОЙ ЛИНИИ — по тому же принципу, что у хищника и
+    // многоклеточности: полу мешает не невыгодность, а старт. Замерено — при равном
+    // старте пол выигрывает (1741 против 1210 к 30 000 ч), но одинокому мутанту не с
+    // кем скрещиваться. Поэтому первый половой потомок сразу получает выводок побольше
+    // и запас, чтобы вокруг него возникла группа партнёров, а не одиночка.
+    if(g.sexual >= 0.5 && pg.sexual < 0.15){
+      g.broodSize = Math.max(g.broodSize, 3);
+      g.__endow = Math.max(g.__endow, 10);
+    }
     // Пакет СМЕНЫ НИШИ. Мутант-травоядное наследует photo~0.8 и получает herb~0.85 —
     // перевес пограничный, и потомки тут же сваливаются обратно в фототрофы. Замерено:
     // травоядных 0-2 особи при положительном сальдо, то есть ниша не популяция, а
@@ -628,6 +658,7 @@
       cycleHours: 14+Math.random()*14, moveSpeed: 0.4+Math.random()*0.4,
       lifespan: 280+Math.random()*350, broodSize: 1,
       shapeType: 0, shapeA: 1, shapeB: 1,      // основатель одноклеточный
+      sexual: 0,                               // пол обязан возникнуть мутацией, как и ниши
     };
   }
   function spawnFounder(i, e){
@@ -922,9 +953,35 @@
       for(const o of body.tpl){ if(o[0]+1>pw) pw=o[0]+1; if(o[1]+1>ph) ph=o[1]+1; }
       const pReach = Math.ceil((pw>ph?pw:ph)/2);
 
+      // Половое размножение: партнёр той же ниши, совместимый, сам готовый.
+      let mate = null;
+      if(Math.random() < g.sexual){
+        const hx0 = body.cells[0]%COLS, hy0 = (body.cells[0]/COLS)|0;
+        for(let so=0; so<senseOffsets.length && !mate; so++){
+          const nx = hx0+senseOffsets[so][0], ny = hy0+senseOffsets[so][1];
+          if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+          const ni = idx(nx,ny);
+          if(state[ni]!==1 || owner[ni]===body.id) continue;
+          const cand = bodies.get(owner[ni]);
+          if(!cand || cand.cooldown > 0) continue;
+          if(cand.energy < cand.g.thresh*0.5) continue;   // партнёр должен быть в силах
+          if(cand.g.sexual < 0.15) continue;              // и сам не быть строго клональным
+          if(!compatible(body, cand)) continue;
+          mate = cand;
+        }
+        // ФАКУЛЬТАТИВНЫЙ пол: не дождавшись партнёра, размножаемся клонально. Так
+        // поступают многие реальные виды, и это снимает проблему старта — одинокий
+        // половой мутант иначе ждал бы вечно и проигрывал.
+        if(!mate){
+          body.mateWait = (body.mateWait || 0) + 1;
+          if(body.mateWait < MATE_PATIENCE) continue;
+          body.mateWait = 0;
+        } else body.mateWait = 0;
+      }
+
       let madeAny = false;
       for(let k=0;k<g.broodSize;k++){
-        const cg = mutateGenome(g, body.guild==='pred');
+        const cg = mutateGenome(mate ? recombine(g, mate.g) : g, body.guild==='pred');
         const cTplArr = templateOf(cg.shapeType, cg.shapeA, cg.shapeB);
         // крупный потомок стоит родителю пропорционально телу, которое ему предстоит
         // построить, иначе он стартует с крохами энергии и гибнет недостроенным
@@ -955,10 +1012,12 @@
         // Провал по месту ставит паузу, а не повторяется каждый час: замерено
         // 19,4 млн неудачных размещений за 10000 часов — это и был главный расход.
         if(!child){ body.cooldown = Math.max(6, g.cycleHours*0.3); break; }
-        body.energy -= childCost;
+        // цена делится между родителями — это и есть двукратная цена пола
+        if(mate){ body.energy -= childCost*0.5; mate.energy -= childCost*0.5; sexBirths++; }
+        else body.energy -= childCost;
         madeAny = true;
       }
-      if(madeAny) body.cooldown = g.cycleHours;
+      if(madeAny){ body.cooldown = g.cycleHours; if(mate) mate.cooldown = mate.g.cycleHours; }
     }
 
     hours++;
@@ -1006,7 +1065,7 @@
     computeFertility();
     document.getElementById('log').innerHTML = '';
     knownLineages = new Set(); lineageHueJitter = {};
-    extinctCount = 0; actionCount = 0; moveCount = 0; sporeGermCount = 0;
+    extinctCount = 0; actionCount = 0; moveCount = 0; sporeGermCount = 0; sexBirths = 0;
     flashes = []; allExtinctNotified = false; hours = 0; guildsEverSeen = new Set(['photo']);
     const initColonies = parseInt(document.getElementById('initColonies').value,10) || 24;
     let placed=0, guard=0;
@@ -1118,7 +1177,7 @@
   }
 
   function updateStats(){
-    let pop=0, corpses=0, multi=0, diff=0, maxBody=0;
+    let pop=0, corpses=0, multi=0, diff=0, maxBody=0, sexN=0;
     let sAg=0,sAr=0,sPh=0,sHe=0,sSa=0,sMov=0,sLife=0,sBrood=0,sCyc=0,sEf=0;
     const counts = {photo:0,herb:0,pred:0,sapro:0};
     for(let i=0;i<N;i++) if(state[i]===2) corpses++;
@@ -1128,6 +1187,7 @@
       if(n>1) multi++;
       if(n>maxBody) maxBody = n;
       if(b.cells.some(c=>!isBorder(b,c))) diff++;
+      if(g.sexual >= 0.5) sexN++;
       sAg+=g.aggression*n; sAr+=g.armor*n; sPh+=g.photo*n; sHe+=g.herb*n; sSa+=g.sapro*n;
       sMov+=g.moveSpeed*n; sLife+=g.lifespan*n; sBrood+=g.broodSize*n; sCyc+=g.cycleHours*n; sEf+=g.effic*n;
     }
@@ -1143,6 +1203,8 @@
     set('sExtinct', extinctCount); set('sFights', actionCount); set('sMoves', moveCount);
     set('sSpores', sporeGermCount); set('sBodies', multi); set('sMaxBody', maxBody);
     set('sDiff', diff);
+    set('sSex', bodies.size ? `${sexN} (${Math.round(sexN/bodies.size*100)}%)` : '0');
+    set('sSexB', sexBirths);
     set('sLight', `${(params.light*dayFactor).toFixed(2)} (${dayFactor>0.5?'день':'ночь'}, макс ${params.light.toFixed(2)})`);
 
     const guildColors = {photo:'#4ade80', herb:'#facc15', pred:'#ff5c7a', sapro:'#b088f9'};

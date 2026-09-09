@@ -37,15 +37,15 @@ const HFRAC = 0.35, HCAP = 8, HMIN = 0.4;   // доля от энергии ра
 
 const GENES = ['metab','effic','thresh','costFrac','minN','maxN','aggression','armor',
                'photo','herb','sapro','cycleHours','moveSpeed','lifespan','broodSize',
-               'shapeType','shapeA','shapeB'];
+               'shapeType','shapeA','shapeB','sexual'];
 const RANGE = {
   metab:[0.15,1.7], effic:[0.35,1.0], thresh:[4,40], costFrac:[0.2,0.9],
   minN:[0,4], maxN:[1,8], aggression:[0,1], armor:[0,1], photo:[0,1], herb:[0,1],
   sapro:[0,1], cycleHours:[4,1200], moveSpeed:[0.15,1], lifespan:[100,12000],
-  broodSize:[1,4], shapeType:[0,3], shapeA:[1,5], shapeB:[1,5],
+  broodSize:[1,4], shapeType:[0,3], shapeA:[1,5], shapeB:[1,5], sexual:[0,1],
 };
 const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
-                photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150 };
+                photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25 };
 const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
 
 let state = new Uint8Array(N);        // 0 пусто, 1 живая клетка, 2 труп
@@ -63,7 +63,7 @@ let hours = 0, phaseX = 0, phaseY = 0, dayFactor = 1;
 const order = [];   // переиспользуемый буфер обхода тел
 let params = { mutation: 0.12, decomp: 0.3, light: 0.62, predation: true, dayNight: true };
 function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0,
-  dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0,
+  dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0,
   bornBy:{photo:0,herb:0,pred:0,sapro:0}, diedBy:{photo:0,herb:0,pred:0,sapro:0},
   lifeBy:{photo:0,herb:0,pred:0,sapro:0}, fedBy:{photo:0,herb:0,pred:0,sapro:0} }; }
 let stats = freshStats();
@@ -153,6 +153,17 @@ function computeFertility() {
     const n = 0.5 + 0.5*Math.sin(x*0.16+phaseX)*Math.cos(y*0.11+phaseY) + 0.2*Math.sin((x+y)*0.07+phaseX*0.5);
     fertility[idx(x,y)] = clamp(0.7 + 0.45*n, 0.45, 1.15);
   }
+}
+
+// Партнёр должен быть той же ниши и генетически близким. Отдельного поля «вид» нет:
+// расхождение по пищевым генам само разводит линии на нескрещивающиеся группы.
+const SPECIES_GAP = 0.30;
+const MATE_PATIENCE = parseInt(process.env.MP||'48',10);   // часов ожидания партнёра до клонирования
+function compatible(a, b) {
+  if (a.guild !== b.guild) return false;
+  const x = a.g, y = b.g;
+  return Math.abs(x.photo-y.photo) <= SPECIES_GAP && Math.abs(x.herb-y.herb) <= SPECIES_GAP
+      && Math.abs(x.aggression-y.aggression) <= SPECIES_GAP && Math.abs(x.sapro-y.sapro) <= SPECIES_GAP;
 }
 
 function guildOfGenome(g) {
@@ -250,6 +261,15 @@ function moveBody(body, dx, dy) {
 }
 
 // ---------- мутация ----------
+// Каждый ген потомка берётся от одного из двух родителей броском монеты, и только
+// потом накладывается обычная мутация. В этом и весь смысл пола: удачные сочетания,
+// собранные из разных линий, а не медленный дрейф одной.
+function recombine(ga, gb) {
+  const g = {};
+  for (const k of GENES) g[k] = Math.random() < 0.5 ? ga[k] : gb[k];
+  return g;
+}
+
 function mutateGenome(pg, wasPred) {
   const m = params.mutation, g = {};
   for (const k of GENES) g[k] = pg[k];
@@ -296,6 +316,15 @@ function mutateGenome(pg, wasPred) {
   if (tplSize > parentTpl) {
     g.lifespan = Math.max(g.lifespan, 800 + tplSize*180 + Math.random()*600);
   }
+  // Пакет ОСНОВАНИЯ ПОЛОВОЙ ЛИНИИ, по тому же принципу, что у хищника и
+  // многоклеточности: полу мешает не невыгодность, а старт. Замерено — при равном
+  // старте пол выигрывает (1741 против 1210 к 30 000 ч), но одинокому мутанту не с
+  // кем скрещиваться. Поэтому первый половой потомок сразу получает выводок побольше
+  // и запас, чтобы вокруг него возникла группа совместимых партнёров, а не одиночка.
+  if (g.sexual >= 0.5 && pg.sexual < 0.15) {
+    g.broodSize = Math.max(g.broodSize, 3);
+    g.__endow = Math.max(g.__endow || 0, 10);
+  }
   if (guildOfGenome(g) === 'pred' && !wasPred) {
     g.lifespan = Math.max(g.lifespan, 1800 + Math.random()*3200);
     g.moveSpeed = Math.max(g.moveSpeed, 0.65 + Math.random()*0.3);
@@ -316,6 +345,7 @@ function founderGenome() {
     photo: 0.55+Math.random()*0.35, herb: 0.02+Math.random()*0.06, sapro: 0.02+Math.random()*0.06,
     cycleHours: 14+Math.random()*14, moveSpeed: 0.4+Math.random()*0.4,
     lifespan: 280+Math.random()*350, broodSize: 1,
+    sexual: 0,   // пол обязан возникнуть мутацией, как и все ниши
     shapeType: 0, shapeA: 1, shapeB: 1,          // основатель одноклеточный
   };
 }
@@ -628,10 +658,42 @@ function step() {
       }
       return null;
     }
+    // Половое размножение: партнёр той же ниши, совместимый, сам готовый. Если
+    // склонность к полу есть, а партнёра рядом нет — организм ЖДЁТ и не размножается
+    // в этот час. Отсюда требование к продолжительности жизни: короткоживущая
+    // половая линия просто не доживает до встречи.
+    let mate = null;
+    if (Math.random() < g.sexual) {
+      const hx0 = body.cells[0]%COLS, hy0 = (body.cells[0]/COLS)|0;
+      for (let so=0; so<senseOffsets.length && !mate; so++) {
+        const nx = hx0+senseOffsets[so][0], ny = hy0+senseOffsets[so][1];
+        if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
+        const ni = idx(nx,ny);
+        if (state[ni]!==1 || owner[ni]===body.id) continue;
+        const cand = bodies.get(owner[ni]);
+        if (!cand || cand.cooldown > 0) continue;
+        if (cand.energy < cand.g.thresh*0.5) continue;   // партнёр должен быть в силах
+        if (cand.g.sexual < 0.15) continue;              // и сам не быть строго клональным
+        if (!compatible(body, cand)) continue;
+        mate = cand;
+      }
+      // ФАКУЛЬТАТИВНЫЙ пол: не дождавшись партнёра, размножаемся клонально. Так
+      // поступают многие реальные виды, и это снимает проблему старта: одинокий
+      // половой мутант в клональном мире не имеет партнёра вовсе, ждёт и проигрывает.
+      // Замерено: при равном старте пол выигрывает (1741 против 1210 к 30 000 ч),
+      // но возникнув в одиночку — не может закрепиться.
+      if (!mate) {
+        stats.mateFail++;
+        body.mateWait = (body.mateWait || 0) + 1;
+        if (body.mateWait < MATE_PATIENCE) continue;   // ещё ждём
+        body.mateWait = 0;                             // терпение вышло — клонируемся
+      } else body.mateWait = 0;
+    }
+
     const wanted = g.broodSize;
     let madeAny = false;
     for (let k=0;k<wanted;k++) {
-      const cg = mutateGenome(g, body.guild==='pred');
+      const cg = mutateGenome(mate ? recombine(g, mate.g) : g, body.guild==='pred');
       // крупный потомок стоит родителю пропорционально телу, которое ему предстоит
       // построить — иначе он стартует с крохами энергии и гибнет, не достроившись
       const cTplArr = templateOf(cg.shapeType, cg.shapeA, cg.shapeB);
@@ -639,10 +701,13 @@ function step() {
       if (body.energy < childCost + g.thresh*0.5) break;
       const child = placeChild(cTplArr, cg, Math.max(childCost*0.55, cg.__endow||0));
       if (!child) { stats.noSpot++; body.cooldown = Math.max(6, g.cycleHours*0.3); break; }
-      body.energy -= childCost; madeAny = true;
+      // цена делится между родителями — это и есть двукратная цена пола
+      if (mate) { body.energy -= childCost*0.5; mate.energy -= childCost*0.5; stats.sexBirths++; }
+      else body.energy -= childCost;
+      madeAny = true;
       const k = (body.foot.length>1) ? acct.multi : acct.uni; k.kids++;
     }
-    if (madeAny) body.cooldown = g.cycleHours;
+    if (madeAny) { body.cooldown = g.cycleHours; if (mate) mate.cooldown = mate.g.cycleHours; }
   }
   hours++;
 }
@@ -678,12 +743,19 @@ function snapshot() {
     shapes[b.g.shapeType]++;
   }
   let corpses=0; for (let i=0;i<N;i++) if (state[i]===2) corpses++;
+  let sexN=0, sexSum=0, lifeSex=0, lifeAsex=0, nSex=0, nAsex=0;
+  for (const b of bodies.values()) {
+    sexSum += b.g.sexual;
+    if (b.g.sexual >= 0.5) { sexN++; lifeSex += b.g.lifespan; nSex++; }
+    else { lifeAsex += b.g.lifespan; nAsex++; }
+  }
   let doneCnt=0; for (const b of bodies.values()) if (b.cells.length>=b.foot.length) doneCnt++;
-  return { hours, org: bodies.size, cells, corpses, ...gc, multi, diff, maxSize, done: doneCnt,
+  return { hours, org: bodies.size, cells, corpses, sexN, sexAvg: bodies.size? +(sexSum/bodies.size).toFixed(3):0,
+           lifeSex: nSex? Math.round(lifeSex/nSex):0, lifeAsex: nAsex? Math.round(lifeAsex/nAsex):0, ...gc, multi, diff, maxSize, done: doneCnt,
            effic: bodies.size? (effSum/bodies.size).toFixed(2):'-', shapes };
 }
 
-module.exports = { get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, templateOf, tryPlaceBody, founderGenome,
+module.exports = { compatible, get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, templateOf, tryPlaceBody, founderGenome,
   get gacct(){ return gacct; }, gReset,
   get acct(){ return acct; }, acctReset,
   get hours(){ return hours; } };
