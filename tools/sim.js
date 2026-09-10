@@ -33,7 +33,20 @@ const AGE_SCALE = Math.sqrt;
 // среднем 10600 из потолка 12000, а metab стоял на 0.17 при полу 0.15.
 // SOMA — принцип одноразовой сомы: содержание долговечного тела стоит каждый час,
 // пропорционально заявленному пределу жизни. Иначе долгожительство бесплатно.
-const SOMA = parseFloat(process.env.SOMA || '0.000020');
+const SOMA = parseFloat(process.env.SOMA || '0.000008');
+// ── ПАРАЗИТЫ. Заражение — состояние тела, а не отдельная сущность на сетке: так
+// дешевле и точнее по смыслу. У паразита свой генотип-«ключ»; у хозяина «замок»
+// (immuneKey) и сила иммунитета. Ключ должен подойти к замку, иначе заражение
+// маловероятно. Ключ мутирует при передаче и потому ДОГОНЯЕТ распространённый
+// замок — отсюда отбор, зависящий от частоты: выгодно быть редким. Это
+// единственный механизм, который ПОДДЕРЖИВАЕТ разброс генов, а не схлопывает его.
+const PAR_VIR  = parseFloat(process.env.PVIR  || '1.0');
+const PAR_INF  = parseFloat(process.env.PINF  || '0.05');
+const PAR_SEED = parseFloat(process.env.PSEED || '0.004');
+const IMM_COST = parseFloat(process.env.ICOST || '0.06');
+const PAR_DMG  = parseFloat(process.env.PDMG || '0.03');
+const MATCH_W  = 0.15;
+const keyDist = (a,b) => { const d = Math.abs(a-b); return d < 0.5 ? d : 1-d; };
 // PACE — обмен веществ это СКОРОСТЬ, а не только расход: множитель на весь доход,
 // и на свет, и на еду. Иначе низкий metab — чистый выигрыш без всякой цены.
 // Зависимость НАСЫЩАЮЩАЯСЯ (как кинетика фермента), а не линейная: только так
@@ -56,15 +69,15 @@ const HFRAC = 0.35, HCAP = 8, HMIN = 0.4;   // доля от энергии ра
 
 const GENES = ['metab','effic','thresh','costFrac','minN','maxN','aggression','armor',
                'photo','herb','sapro','cycleHours','moveSpeed','lifespan','broodSize',
-               'shapeType','shapeA','shapeB','sexual'];
+               'shapeType','shapeA','shapeB','sexual','immunity','immuneKey'];
 const RANGE = {
   metab:[0.15,1.7], effic:[0.35,1.0], thresh:[4,40], costFrac:[0.2,0.9],
   minN:[0,4], maxN:[1,8], aggression:[0,1], armor:[0,1], photo:[0,1], herb:[0,1],
   sapro:[0,1], cycleHours:[4,1200], moveSpeed:[0.15,1], lifespan:[100,12000],
-  broodSize:[1,4], shapeType:[0,3], shapeA:[1,5], shapeB:[1,5], sexual:[0,1],
+  broodSize:[1,4], shapeType:[0,3], shapeA:[1,10], shapeB:[1,10], sexual:[0,1], immunity:[0,1], immuneKey:[0,1],
 };
 const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
-                photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25 };
+                photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25, immunity:0.25, immuneKey:0.15 };
 const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
 
 let state = new Uint8Array(N);        // 0 пусто, 1 живая клетка, 2 труп
@@ -82,7 +95,7 @@ let hours = 0, phaseX = 0, phaseY = 0, dayFactor = 1;
 const order = [];   // переиспользуемый буфер обхода тел
 let params = { mutation: 0.12, decomp: 0.3, light: 0.62, predation: true, dayNight: true, sexReprod: true };
 function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0,
-  dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0,
+  dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0, parInfect:0, parCleared:0, parSeed:0, parHours:0,
   bornBy:{photo:0,herb:0,pred:0,sapro:0}, diedBy:{photo:0,herb:0,pred:0,sapro:0},
   lifeBy:{photo:0,herb:0,pred:0,sapro:0}, fedBy:{photo:0,herb:0,pred:0,sapro:0} }; }
 let stats = freshStats();
@@ -95,7 +108,7 @@ function acctReset(){ acct = { uni:{h:0,cells:0,inc:0,upk:0,kids:0}, multi:{h:0,
 // ---------- шаблоны формы ----------
 const tplCache = new Map();
 function templateOf(type, a, b) {
-  if (type >= 2) { a = Math.min(a, 3); b = Math.min(b, 3); }
+  if (type >= 2) { a = Math.min(a, 5); b = Math.min(b, 5); }
   const key = type + ':' + a + ':' + b;
   if (tplCache.has(key)) return tplCache.get(key);
   let cells = [];
@@ -365,6 +378,8 @@ function founderGenome() {
     cycleHours: 14+Math.random()*14, moveSpeed: 0.4+Math.random()*0.4,
     lifespan: 280+Math.random()*350, broodSize: 1,
     sexual: 0,   // пол обязан возникнуть мутацией, как и все ниши
+    immunity: 0.05+Math.random()*0.05,
+    immuneKey: Math.random(),   // «замок»: какой генотип паразита распознаётся
     shapeType: 0, shapeA: 1, shapeB: 1,          // основатель одноклеточный
   };
 }
@@ -435,6 +450,15 @@ function step() {
     const interiorFrac = size ? interiorCount / size : 0;
 
     // ---- доход ----
+    if (body.par) {
+      body.par.load = Math.min(1, body.par.load + 0.03);
+      body.energy -= body.par.load * PAR_VIR * size * PAR_DMG;   // крупное тело — крупная мишень
+      stats.parHours++;
+      // Базовое выздоровление обязательно: при чистом `иммунитет*0.02` и стартовом
+      // иммунитете 0.08 срок болезни выходил 625 часов, то есть пожизненно, и мир
+      // вымирал прежде, чем иммунитет успевал подняться отбором.
+      if (Math.random() < 0.004 + g.immunity*0.06) { body.par = null; stats.parCleared++; }
+    }
     const pace = paceOf(g.metab);   // темп обмена: множитель на весь доход
     let income = 0;
     if (body.guild === 'photo') {
@@ -467,7 +491,8 @@ function step() {
     const moveTax = (body.guild==='herb'||body.guild==='pred') ? g.moveSpeed*0.03*size : 0;
     const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
                  + crowdSame*0.045 + (crowd-crowdSame)*0.006 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax
-                 + size*g.lifespan*SOMA;   // содержание долговечного тела
+                 + size*g.lifespan*SOMA
+                 + size*g.immunity*IMM_COST;   // содержание долговечного тела
     { const k = (body.foot.length>1 && size>=body.foot.length) ? acct.multi : (body.foot.length===1 ? acct.uni : null);
       if (k) { k.h++; k.cells += size; k.inc += income; k.upk += upkeep; } }
     { const q = gacct[body.guild]; q.h++; q.inc += income; q.upk += upkeep; }
@@ -730,6 +755,30 @@ function step() {
     }
     if (madeAny) { body.cooldown = g.cycleHours; if (mate) mate.cooldown = mate.g.cycleHours; }
   }
+  for (const body of bodies.values()) {
+    if (!body.par || body.par.load < 0.25) continue;
+    const src = body.cells[Math.floor(Math.random()*body.cells.length)];
+    const c = NB24.cnt[src], base = src*NB24.k;
+    for (let o=0;o<c;o++) {
+      const ni = NB24.tab[base+o];
+      if (state[ni]!==1 || owner[ni]===body.id) continue;
+      const host = bodies.get(owner[ni]);
+      if (!host || host.par) continue;
+      const fit = keyDist(body.par.key, host.g.immuneKey) < MATCH_W ? 1 : 0.12;
+      if (Math.random() < PAR_INF * fit * (1 - host.g.immunity*0.85)) {
+        let k = body.par.key + (Math.random()*2-1)*0.04;   // ключ мутирует при передаче
+        k = k < 0 ? k+1 : (k > 1 ? k-1 : k);
+        host.par = { key: k, load: 0.05 };
+        stats.parInfect++;
+        break;
+      }
+    }
+  }
+  if (bodies.size && Math.random() < PAR_SEED) {
+    const arr = [...bodies.values()];
+    const v = arr[Math.floor(Math.random()*arr.length)];
+    if (!v.par) { v.par = { key: Math.random(), load: 0.05 }; stats.parSeed++; }
+  }
   hours++;
 }
 
@@ -764,14 +813,19 @@ function snapshot() {
     shapes[b.g.shapeType]++;
   }
   let corpses=0; for (let i=0;i<N;i++) if (state[i]===2) corpses++;
-  let sexN=0, sexSum=0, lifeSex=0, lifeAsex=0, nSex=0, nAsex=0;
+  let sexN=0, sexSum=0, lifeSex=0, lifeAsex=0, nSex=0, nAsex=0, infected=0, immSum=0; const keys=[];
   for (const b of bodies.values()) {
     sexSum += b.g.sexual;
+    if (b.par) infected++;
+    immSum += b.g.immunity; keys.push(b.g.immuneKey);
     if (b.g.sexual >= 0.5) { sexN++; lifeSex += b.g.lifespan; nSex++; }
     else { lifeAsex += b.g.lifespan; nAsex++; }
   }
   let doneCnt=0; for (const b of bodies.values()) if (b.cells.length>=b.foot.length) doneCnt++;
-  return { hours, org: bodies.size, cells, corpses, sexN, sexAvg: bodies.size? +(sexSum/bodies.size).toFixed(3):0,
+  const kMean = keys.length ? keys.reduce((a,b)=>a+b,0)/keys.length : 0;
+  const kSd = keys.length ? Math.sqrt(keys.reduce((a,b)=>a+(b-kMean)*(b-kMean),0)/keys.length) : 0;
+  return { hours, org: bodies.size, cells, corpses, sexN,
+           infected, immAvg: bodies.size? +(immSum/bodies.size).toFixed(3):0, keySd: +kSd.toFixed(3), sexAvg: bodies.size? +(sexSum/bodies.size).toFixed(3):0,
            lifeSex: nSex? Math.round(lifeSex/nSex):0, lifeAsex: nAsex? Math.round(lifeAsex/nAsex):0, ...gc, multi, diff, maxSize, done: doneCnt,
            effic: bodies.size? (effSum/bodies.size).toFixed(2):'-', shapes };
 }
