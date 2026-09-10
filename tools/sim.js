@@ -28,6 +28,25 @@ const ASSIM_CAP = 0.9;
 const ASSIM_BASE = { herb: 0.70, pred: 0.88, sapro: 0.80 };
 const GROWTH_COST_FRAC = 0.20;  // вырастить свою клетку много дешевле, чем снарядить потомка
 const AGE_SCALE = Math.sqrt;
+// ── ДВА КОМПРОМИССА, без которых гены упираются в край шкалы и эволюция по ним
+// останавливается. Замерено: разброс lifespan падал вчетверо (3833 -> 892) при
+// среднем 10600 из потолка 12000, а metab стоял на 0.17 при полу 0.15.
+// SOMA — принцип одноразовой сомы: содержание долговечного тела стоит каждый час,
+// пропорционально заявленному пределу жизни. Иначе долгожительство бесплатно.
+const SOMA = parseFloat(process.env.SOMA || '0.000020');
+// PACE — обмен веществ это СКОРОСТЬ, а не только расход: множитель на весь доход,
+// и на свет, и на еду. Иначе низкий metab — чистый выигрыш без всякой цены.
+// Зависимость НАСЫЩАЮЩАЯСЯ (как кинетика фермента), а не линейная: только так
+// оптимум оказывается ВНУТРИ шкалы. Линейная давала бы край, то есть ту же
+// остановку эволюции, которую мы и лечим. Нормирована на METAB_REF, чтобы при
+// нынешнем обмене множитель равнялся единице и мир не обвалился от самой правки.
+const PACE_K = parseFloat(process.env.PK || '0.30'), METAB_REF = 0.17;
+const PACE_NORM = METAB_REF/(METAB_REF+PACE_K);
+// Размах намеренно узкий: компромисс должен существовать, но не перестраивать мир.
+// Без ограничения множитель доходил до 2.35, популяция раздувалась, и правка
+// превращалась из «вернуть эволюцию» в «сделать другую симуляцию».
+const PACE_LO = 0.90, PACE_HI = 1.30;
+const paceOf = m => Math.min(PACE_HI, Math.max(PACE_LO, (m/(m+PACE_K))/PACE_NORM));
    // равномерная освещённость плоской плёнки
 const GRAZE_LEFT = 0.12;   // от съеденного растения остаётся лишь остаток
 
@@ -416,12 +435,13 @@ function step() {
     const interiorFrac = size ? interiorCount / size : 0;
 
     // ---- доход ----
+    const pace = paceOf(g.metab);   // темп обмена: множитель на весь доход
     let income = 0;
     if (body.guild === 'photo') {
       for (const i of body.cells) {
         const y = (i/COLS)|0;
         const synth = !differentiated ? 1 : (borderMark[i] ? BORDER_SYNTH : INTERIOR_SYNTH);
-        income += g.photo * vGrad[y] * dayFactor * PHOTO_GAIN * fertility[i] * synth;
+        income += g.photo * vGrad[y] * dayFactor * PHOTO_GAIN * fertility[i] * synth * pace;
       }
     }
     body.energy += income;
@@ -446,7 +466,8 @@ function step() {
       } }
     const moveTax = (body.guild==='herb'||body.guild==='pred') ? g.moveSpeed*0.03*size : 0;
     const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
-                 + crowdSame*0.045 + (crowd-crowdSame)*0.006 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax;
+                 + crowdSame*0.045 + (crowd-crowdSame)*0.006 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax
+                 + size*g.lifespan*SOMA;   // содержание долговечного тела
     { const k = (body.foot.length>1 && size>=body.foot.length) ? acct.multi : (body.foot.length===1 ? acct.uni : null);
       if (k) { k.h++; k.cells += size; k.inc += income; k.upk += upkeep; } }
     { const q = gacct[body.guild]; q.h++; q.inc += income; q.upk += upkeep; }
@@ -461,7 +482,7 @@ function step() {
       const processing = 1 + INTERIOR_PROCESS * interiorFrac;
       let gained = 0;   // сколько энергии дал этот час кормёжки
       // итоговая доля усвоения — никогда не больше ASSIM_CAP, то есть всегда < 1
-      const assim = Math.min(ASSIM_CAP, ASSIM_BASE[body.guild] * g.effic * processing);
+      const assim = Math.min(ASSIM_CAP, ASSIM_BASE[body.guild] * g.effic * processing) * pace;   // темп обмена и на еду
       // Ниша соседа берётся из cellGuild, а не из bodies.get(): три замыкания-предиката
       // пересоздавались на КАЖДОЕ тело КАЖДЫЙ час и стоили ~7% профиля.
       const myId = body.id, mode = GCODE[body.guild];
