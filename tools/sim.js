@@ -63,21 +63,39 @@ const paceOf = m => Math.min(PACE_HI, Math.max(PACE_LO, (m/(m+PACE_K))/PACE_NORM
    // равномерная освещённость плоской плёнки
 const GRAZE_LEFT = 0.12;   // от съеденного растения остаётся лишь остаток
 
+// ── СЕМЕНА. Спора сапротрофа безымянна (поле плотности), семя НЕСЁТ ГЕНОМ и
+// потому лежит отдельным списком, а не слоем сетки. Семя даёт то, чего у
+// сидячего фототрофа нет: расселение (потомок не обязан помещаться вплотную к
+// родителю) и покой (можно переждать ночь, тень и занятую клетку). Ставится
+// только на ПОЛОВОЕ размножение — клональное деление остаётся вегетативным,
+// вплотную. Так у пола появляется выгода, не сводящаяся к рекомбинации.
+const SEED_RANGE = parseInt(process.env.SRANGE||'14',10);  // максимум разлёта при dispersal=1
+const SEED_OVERHEAD = 0.35;   // оболочка семени — накладной расход сверх провизии
+const SEED_FLIGHT = 0.30;     // цена дальнего разлёта, доля от цены потомка
+const SEED_UPKEEP = parseFloat(process.env.SUPK||'0.012');  // семя дышит, запас тает
+const SEED_GERM_LIGHT = parseFloat(process.env.SGL||'0.25'); // ниже этого не всходит, ждёт
+const SEED_DRIFT = 0.02;      // ветер: семя сносит на клетку, само оно не ходит
+const SEED_MAX = parseInt(process.env.SMAX||'3000',10);
+const SEEDS_ON = process.env.SEEDS !== '0';   // выключатель для контрольного прогона
+
 const SAT = 1.0;   // насколько час кормёжки должен окупать расходы, чтобы остаться на месте
 const HFRAC = 0.35, HCAP = 8, HMIN = 0.4;   // доля от энергии растения, потолок, абсолютный минимум укуса
     // старение растёт с размером тела, но не линейно  // вырастить свою клетку дешевле, чем породить организм  // внутренние перерабатывают добытое барьером
 
 const GENES = ['metab','effic','thresh','costFrac','minN','maxN','aggression','armor',
                'photo','herb','sapro','cycleHours','moveSpeed','lifespan','broodSize',
-               'shapeType','shapeA','shapeB','sexual','immunity','immuneKey'];
+               'shapeType','shapeA','shapeB','sexual','immunity','immuneKey',
+               'dispersal','seedProv'];
 const RANGE = {
   metab:[0.15,1.7], effic:[0.35,1.0], thresh:[4,40], costFrac:[0.2,0.9],
   minN:[0,4], maxN:[1,8], aggression:[0,1], armor:[0,1], photo:[0,1], herb:[0,1],
   sapro:[0,1], cycleHours:[4,1200], moveSpeed:[0.15,1], lifespan:[100,12000],
   broodSize:[1,4], shapeType:[0,3], shapeA:[1,10], shapeB:[1,10], sexual:[0,1], immunity:[0,1], immuneKey:[0,1],
+  dispersal:[0,1], seedProv:[0,1],
 };
 const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
-                photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25, immunity:0.25, immuneKey:0.15 };
+                photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25, immunity:0.25, immuneKey:0.15,
+                dispersal:0.25, seedProv:0.25 };
 const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
 
 let state = new Uint8Array(N);        // 0 пусто, 1 живая клетка, 2 труп
@@ -90,12 +108,14 @@ const borderMark = new Uint8Array(N);   // переиспользуемый ма
 let borderBuf = new Int32Array(4096); // переиспользуемый буфер барьерных клеток
 
 let bodies = new Map();
+let seeds = [];   // {i, g, lineage, energy}
 let nextBodyId = 1, nextLineageId = 1;
 let hours = 0, phaseX = 0, phaseY = 0, dayFactor = 1;
 const order = [];   // переиспользуемый буфер обхода тел
 let params = { mutation: 0.12, decomp: 0.3, light: 0.62, predation: true, dayNight: true, sexReprod: true };
 function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0,
   dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0, parInfect:0, parCleared:0, parSeed:0, parHours:0,
+  seedMade:0, seedGerm:0, seedRot:0, seedLost:0, seedWait:0,
   bornBy:{photo:0,herb:0,pred:0,sapro:0}, diedBy:{photo:0,herb:0,pred:0,sapro:0},
   lifeBy:{photo:0,herb:0,pred:0,sapro:0}, fedBy:{photo:0,herb:0,pred:0,sapro:0} }; }
 let stats = freshStats();
@@ -380,6 +400,7 @@ function founderGenome() {
     sexual: 0,   // пол обязан возникнуть мутацией, как и все ниши
     immunity: 0.05+Math.random()*0.05,
     immuneKey: Math.random(),   // «замок»: какой генотип паразита распознаётся
+    dispersal: 0.15+Math.random()*0.2, seedProv: 0.3+Math.random()*0.2,
     shapeType: 0, shapeA: 1, shapeB: 1,          // основатель одноклеточный
   };
 }
@@ -419,6 +440,49 @@ function processSpores() {
   }
 }
 
+// Семя ждёт СВОЕГО часа: свободной клетки и света. Всхожесть детерминирована —
+// при выполненных условиях семя всходит, а не бросает кубик (то же правило, что
+// у поедания: случайность на месте решения превращает механику в шум).
+function processSeeds() {
+  if (!seeds.length) return;
+  let w = 0;
+  for (let k=0;k<seeds.length;k++) {
+    const s = seeds[k];
+    s.energy -= SEED_UPKEEP;
+    if (s.energy <= 0.05) { stats.seedRot++; continue; }
+    const x = s.i%COLS, y = (s.i/COLS)|0;
+    if (state[s.i] === 0 && vGrad[y]*dayFactor*fertility[s.i] >= SEED_GERM_LIGHT) {
+      if (tryPlaceBody(s.g, s.lineage, x, y, s.energy)) { stats.seedGerm++; continue; }
+    }
+    stats.seedWait++;
+    // ветер сносит семя — это свойство мира, а не признак семени: своего движения
+    // у семени нет, иначе оно дублировало бы moveSpeed и стало бы просто зверем
+    if (Math.random() < SEED_DRIFT) {
+      const nx = x + (Math.random()*3|0) - 1, ny = y + (Math.random()*3|0) - 1;
+      if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS) s.i = idx(nx,ny);
+    }
+    seeds[w++] = s;
+  }
+  seeds.length = w;
+}
+
+// Запуск семени: точка приземления берётся от случайной клетки родителя, дальность
+// — из гена, но РОЗЫГРЫШЕМ от 1 до предела, иначе дальняя линия теряла бы ближние
+// места целиком. Улетевшее за край чашки семя пропадает — цена дальнего разлёта.
+function launchSeed(body, cg, lineage, provision) {
+  if (seeds.length >= SEED_MAX) return false;
+  const c = body.cells[Math.floor(Math.random()*body.cells.length)];
+  const x = c%COLS, y = (c/COLS)|0;
+  const R = 1 + Math.floor(cg.dispersal*SEED_RANGE);
+  const d = 1 + Math.floor(Math.random()*R);
+  const a = Math.random()*Math.PI*2;
+  const nx = Math.round(x + Math.cos(a)*d), ny = Math.round(y + Math.sin(a)*d);
+  if (nx<0||nx>=COLS||ny<0||ny>=ROWS) { stats.seedLost++; return true; }  // цена уплачена, семя потеряно
+  seeds.push({ i: idx(nx,ny), g: cg, lineage, energy: provision });
+  stats.seedMade++;
+  return true;
+}
+
 function step() {
   const hourOfDay = hours % 24;
   if (params.dayNight) dayFactor = (hourOfDay>=6 && hourOfDay<=18) ? Math.sin((hourOfDay-6)/12*Math.PI) : 0.15;
@@ -428,6 +492,7 @@ function step() {
   if (hours % 8 === 0) computeFertility();
   decayCorpses();
   processSpores();
+  processSeeds();
 
   order.length = 0;
   for (const b of bodies.values()) order.push(b);
@@ -745,6 +810,18 @@ function step() {
       const cTplArr = templateOf(cg.shapeType, cg.shapeA, cg.shapeB);
       const childCost = perChildCost * (1 + 0.35*(cTplArr.length-1));
       if (body.energy < childCost + g.thresh*0.5) break;
+      // ── СЕМЯ вместо подсадки вплотную: только у фототрофа и только при половом
+      // размножении. Провизия и дальность заявлены генами и оплачены сразу; место
+      // при этом НЕ ищется — в том и смысл, что расселение не упирается в тесноту.
+      if (SEEDS_ON && mate && body.guild === 'photo') {
+        const prov = childCost * (0.35 + cg.seedProv*0.8);
+        const seedCost = prov + childCost*(SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT);
+        if (body.energy < seedCost*0.5 + g.thresh*0.25 || mate.energy < seedCost*0.5) break;
+        if (!launchSeed(body, cg, body.lineage, prov)) break;
+        body.energy -= seedCost*0.5; mate.energy -= seedCost*0.5; stats.sexBirths++;
+        madeAny = true;
+        continue;
+      }
       const child = placeChild(cTplArr, cg, Math.max(childCost*0.55, cg.__endow||0));
       if (!child) { stats.noSpot++; body.cooldown = Math.max(6, g.cycleHours*0.3); break; }
       // цена делится между родителями — это и есть двукратная цена пола
@@ -784,6 +861,7 @@ function step() {
 
 function reset(colonies=24) {
   state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
+  seeds.length = 0;
   bodies.clear(); nextBodyId=1; nextLineageId=1; hours=0;
   stats = freshStats();
   // Чашка — плоская плёнка, на которую смотрят СВЕРХУ, поэтому свет равномерен.
@@ -824,13 +902,15 @@ function snapshot() {
   let doneCnt=0; for (const b of bodies.values()) if (b.cells.length>=b.foot.length) doneCnt++;
   const kMean = keys.length ? keys.reduce((a,b)=>a+b,0)/keys.length : 0;
   const kSd = keys.length ? Math.sqrt(keys.reduce((a,b)=>a+(b-kMean)*(b-kMean),0)/keys.length) : 0;
-  return { hours, org: bodies.size, cells, corpses, sexN,
+  let dspSum=0, prvSum=0; for (const b of bodies.values()) { dspSum+=b.g.dispersal; prvSum+=b.g.seedProv; }
+  return { hours, org: bodies.size, cells, corpses, sexN, seeds: seeds.length,
+           dispAvg: bodies.size? +(dspSum/bodies.size).toFixed(3):0, provAvg: bodies.size? +(prvSum/bodies.size).toFixed(3):0,
            infected, immAvg: bodies.size? +(immSum/bodies.size).toFixed(3):0, keySd: +kSd.toFixed(3), sexAvg: bodies.size? +(sexSum/bodies.size).toFixed(3):0,
            lifeSex: nSex? Math.round(lifeSex/nSex):0, lifeAsex: nAsex? Math.round(lifeAsex/nAsex):0, ...gc, multi, diff, maxSize, done: doneCnt,
            effic: bodies.size? (effSum/bodies.size).toFixed(2):'-', shapes };
 }
 
-module.exports = { compatible, get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, templateOf, tryPlaceBody, founderGenome,
+module.exports = { compatible, get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, get seeds(){ return seeds; }, templateOf, tryPlaceBody, founderGenome,
   get gacct(){ return gacct; }, gReset,
   get acct(){ return acct; }, acctReset,
   get hours(){ return hours; } };
