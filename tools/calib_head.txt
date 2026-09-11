@@ -1,0 +1,1 @@
+light,mut,decomp,par,dayNight,predation,sex,seed,extinct_h,org,photo,herb,pred,sapro,maxSize,diff,multi,vir,inf,imm,keySd,myco,mycoShare,dorm,sexShare,dioecy,seeds,spores,eggs,gametes,lifespan,metab,armor,effic,popAvg,popMin,moves,eaten,born
