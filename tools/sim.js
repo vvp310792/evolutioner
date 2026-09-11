@@ -26,6 +26,21 @@ const ASSIM_CAP = 0.9;
 // Порядок величин как в природе: растительная масса усваивается хуже мяса,
 // детрит — между ними. Все три строго меньше единицы.
 const ASSIM_BASE = { herb: 0.70, pred: 0.88, sapro: 0.80 };
+// ── ФАКУЛЬТАТИВНАЯ ГРИБОЯДНОСТЬ. Живого сапротрофа раньше не ел никто: цепь была
+// объявлена как фототроф -> травоядное -> хищник, а гриб замыкал оборот через
+// трупы. Замерено по архиву прогонов: в тупике оказывалось 40% живой биомассы
+// (медиана по 141 миру), а в бедных мирах до 57%. В природе так не бывает —
+// грибы едят ногохвостки, клещи, слизни, кабаны, белки, и грибоядность у
+// насекомых возникала независимо десятки раз.
+// Это НЕ пятая ниша: ниша по-прежнему argmax пищевых генов. Это побочный канал —
+// ген `myco` добавляет грибы в меню травоядному и хищнику, не меняя, кто они.
+// Поэтому и коррелированный пакет ему не нужен, в отличие от смены ниши: малая
+// грибоядность полезна сразу, порога окупаемости у неё нет.
+// Поедание гриба идёт КАК ВЫПАС, а не как охота: кабан не дерётся с грибом,
+// брони и силы удара тут нет, есть доля откушенной массы.
+const ASSIM_MYCO = 0.78;    // гриб питательнее травы, но хуже мяса
+const MYCO_COST = 0.04;     // ферменты для хитина стоят апкипа, иначе ген бесплатен
+const MYCO_ON = process.env.MYCO !== '0';
 const GROWTH_COST_FRAC = 0.20;  // вырастить свою клетку много дешевле, чем снарядить потомка
 const AGE_SCALE = Math.sqrt;
 // ── ДВА КОМПРОМИССА, без которых гены упираются в край шкалы и эволюция по ним
@@ -159,17 +174,17 @@ const HFRAC = 0.35, HCAP = 8, HMIN = 0.4;   // доля от энергии ра
 const GENES = ['metab','effic','thresh','costFrac','minN','maxN','aggression','armor',
                'photo','herb','sapro','cycleHours','moveSpeed','lifespan','broodSize',
                'shapeType','shapeA','shapeB','sexual','immunity','immuneKey',
-               'dispersal','seedProv','dioecy','dormancy'];
+               'dispersal','seedProv','dioecy','dormancy','myco'];
 const RANGE = {
   metab:[0.15,1.7], effic:[0.35,1.0], thresh:[4,40], costFrac:[0.2,0.9],
   minN:[0,4], maxN:[1,8], aggression:[0,1], armor:[0,1], photo:[0,1], herb:[0,1],
   sapro:[0,1], cycleHours:[4,1200], moveSpeed:[0.15,1], lifespan:[100,12000],
   broodSize:[1,4], shapeType:[0,3], shapeA:[1,10], shapeB:[1,10], sexual:[0,1], immunity:[0,1], immuneKey:[0,1],
-  dispersal:[0,1], seedProv:[0,1], dioecy:[0,1], dormancy:[0,1],
+  dispersal:[0,1], seedProv:[0,1], dioecy:[0,1], dormancy:[0,1], myco:[0,1],
 };
 const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
                 photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25, immunity:0.25, immuneKey:0.15,
-                dispersal:0.25, seedProv:0.25, dioecy:0.25, dormancy:0.25 };
+                dispersal:0.25, seedProv:0.25, dioecy:0.25, dormancy:0.25, myco:0.25 };
 const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
 
 let state = new Uint8Array(N);        // 0 пусто, 1 живая клетка, 2 труп
@@ -192,7 +207,7 @@ function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0
   dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0, parInfect:0, parCleared:0, parSeed:0, parHours:0,
   seedMade:0, seedGerm:0, seedRot:0, seedLost:0, seedWait:0,
   sporeMade:0, sporeGerm:0, sporeRot:0, conidiaKin:0, eggMade:0, eggHatch:0, eggRot:0,
-  gamMade:0, gamHit:0, gamLost:0,
+  gamMade:0, gamHit:0, gamLost:0, mycoBites:0,
   bornBy:{photo:0,herb:0,pred:0,sapro:0}, diedBy:{photo:0,herb:0,pred:0,sapro:0},
   lifeBy:{photo:0,herb:0,pred:0,sapro:0}, fedBy:{photo:0,herb:0,pred:0,sapro:0} }; }
 let stats = freshStats();
@@ -587,6 +602,7 @@ function founderGenome() {
     dispersal: 0.15+Math.random()*0.2, seedProv: 0.3+Math.random()*0.2,
     dioecy: 0.1+Math.random()*0.2,   // склонность линии быть раздельнополой
     dormancy: 0.05+Math.random()*0.15,   // глубина покоя зачатка
+    myco: 0,     // грибоядность обязана возникнуть мутацией, как ниши и пол
     shapeType: 0, shapeA: 1, shapeB: 1,          // основатель одноклеточный
   };
 }
@@ -865,7 +881,7 @@ function step() {
     const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
                  + crowdSame*0.045 + (crowd-crowdSame)*0.006 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax
                  + size*g.lifespan*SOMA
-                 + size*g.immunity*IMM_COST;   // содержание долговечного тела
+                 + size*g.immunity*IMM_COST + size*g.myco*MYCO_COST;   // содержание долговечного тела
     { const k = (body.foot.length>1 && size>=body.foot.length) ? acct.multi : (body.foot.length===1 ? acct.uni : null);
       if (k) { k.h++; k.cells += size; k.inc += income; k.upk += upkeep; } }
     { const q = gacct[body.guild]; q.h++; q.inc += income; q.upk += upkeep; }
@@ -893,12 +909,27 @@ function step() {
           else if (state[ni]===1 && owner[ni]!==myId){
             const gq = cellGuild[ni];
             if (mode===G_PRED ? (gq===G_HERB||gq===G_PRED) : gq===G_PHOTO) targets.push(ni);
+            else if (MYCO_ON && gq===G_SAPRO && Math.random() < g.myco) targets.push(ni);
           } } }
 
       const bites = Math.min(borderCells.length, 6);   // укусов за час — по числу барьерных клеток
       if (targets.length) {
         let tgt = targets[Math.floor(Math.random()*targets.length)];
-        if (body.guild === 'pred' && params.predation) {
+        // Гриб едят выпасом, а не охотой: ни брони, ни удара — доля откушенной массы.
+        if (MYCO_ON && cellGuild[tgt] === G_SAPRO && (mode===G_HERB || mode===G_PRED)) {
+          const assimM = Math.min(ASSIM_CAP, ASSIM_MYCO * g.effic * processing) * pace;
+          for (let bi=0; bi<bites; bi++) {
+            const victim = bodies.get(owner[tgt]);
+            if (!victim) break;
+            const bite = Math.min(0.55, g.myco*HFRAC);
+            let drain = Math.max(victim.energy*bite, g.myco*HMIN);
+            drain = Math.min(drain, victim.energy, g.myco*HCAP*Math.sqrt(size));
+            victim.energy -= drain;
+            body.energy += drain*assimM - 0.12; gained += drain*assimM; ate = true;
+            stats.eaten++; stats.mycoBites++; stats.fedBy[body.guild]++;
+            if (victim.energy <= 0) { stats.dPred++; killBody(victim, GRAZE_LEFT); }
+          }
+        } else if (body.guild === 'pred' && params.predation) {
           ate = true;   // добыча в пределах досягаемости: дерёмся, а не уходим
           for (let bi=0; bi<bites; bi++) if (Math.random() < g.aggression*0.65) {
             const victim = bodies.get(owner[tgt]);
@@ -972,7 +1003,8 @@ function step() {
           const ni = idx(nx,ny);
           if (state[ni]!==1 || owner[ni]===myId) continue;
           const gq = cellGuild[ni];
-          if (seekPred ? (gq===G_HERB||gq===G_PRED) : gq===G_PHOTO) { found = [dx,dy]; break; } }
+          if (seekPred ? (gq===G_HERB||gq===G_PRED) : gq===G_PHOTO) { found = [dx,dy]; break; }
+          if (MYCO_ON && gq===G_SAPRO && Math.random() < g.myco) { found = [dx,dy]; break; } }
         let sx, sy;
         if (found) { sx = Math.sign(found[0]); sy = Math.sign(found[1]); }
         else {
@@ -1262,6 +1294,10 @@ function snapshot() {
   // Считается отдельно для половых и клональных линий — в этом вся суть: клон
   // свою гетерозиготность хранит, но никогда не перемешивает.
   const QGEN = GENES.filter(k => !DOMINANT_ONLY.has(k));
+  let mycoSum=0, mycoN=0, mycoHigh=0;
+  for (const b of bodies.values()) if (b.guild==='herb' || b.guild==='pred') {
+    mycoSum += b.g.myco; mycoN++; if (b.g.myco > 0.4) mycoHigh++;
+  }
   let dormSum=0;
   for (const b of bodies.values()) dormSum += b.g.dormancy;
   let dioN=0, maleN=0;
@@ -1282,6 +1318,7 @@ function snapshot() {
   }
   return { hours, org: bodies.size, cells, corpses, sexN, seeds: seeds.length, seedN, sporeN, eggN,
            hetSex: nS? +(hetS/nS).toFixed(4):0, hetAsex: nA? +(hetA/nA).toFixed(4):0, dipN,
+           mycoAvg: mycoN? +(mycoSum/mycoN).toFixed(3):0, mycoShare: mycoN? +(mycoHigh/mycoN).toFixed(3):0,
            dormAvg: bodies.size? +(dormSum/bodies.size).toFixed(3):0,
            dioN, maleShare: dioN? +(maleN/dioN).toFixed(3):0,
            gametes: gametes.length, virAvg: +virAvg.toFixed(3), virSd: +virSd.toFixed(3),
