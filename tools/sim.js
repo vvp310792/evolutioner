@@ -1291,6 +1291,13 @@ function snapshot() {
            effic: bodies.size? (effSum/bodies.size).toFixed(2):'-', shapes };
 }
 
+// Только для стенда: сменить освещённость НА ХОДУ. Обычный `params.light`
+// раскладывается по строкам один раз при сбросе, поэтому правка на бегу сама по
+// себе ничего не делает — нужен этот сеттер. Нужен он для опытов с резкой
+// катастрофой: банк семян должен спасать от внезапного удара, а не от медленного
+// удушения, и проверить это можно только гася свет посреди прогона.
+function setLight(v) { params.light = v; for (let y=0;y<ROWS;y++) vGrad[y] = v; }
+
 // Только для стенда: выкосить нишу целиком и посмотреть, вернётся ли она из
 // банка зачатков. Естественное вымирание ниши в прогоне поймать трудно — оно
 // короткое и совпадает с общим развалом, а здесь условие задаётся ровно.
@@ -1299,7 +1306,7 @@ function killGuild(name) {
   for (const b of [...bodies.values()]) if (b.guild === name) { killBody(b, 1); bodies.delete(b.id); n++; }
   return n;
 }
-module.exports = { killGuild, compatible, get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, get seeds(){ return seeds; }, templateOf, tryPlaceBody, founderGenome,
+module.exports = { setLight, killGuild, compatible, get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, get seeds(){ return seeds; }, templateOf, tryPlaceBody, founderGenome,
   get gacct(){ return gacct; }, gReset,
   get acct(){ return acct; }, acctReset,
   get hours(){ return hours; } };
