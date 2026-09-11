@@ -179,7 +179,7 @@ const RANGE = {
   metab:[0.15,1.7], effic:[0.35,1.0], thresh:[4,40], costFrac:[0.2,0.9],
   minN:[0,4], maxN:[1,8], aggression:[0,1], armor:[0,1], photo:[0,1], herb:[0,1],
   sapro:[0,1], cycleHours:[4,1200], moveSpeed:[0.15,1], lifespan:[100,12000],
-  broodSize:[1,4], shapeType:[0,3], shapeA:[1,10], shapeB:[1,10], sexual:[0,1], immunity:[0,1], immuneKey:[0,1],
+  broodSize:[1,4], shapeType:[0,3], shapeA:[1,30], shapeB:[1,30], sexual:[0,1], immunity:[0,1], immuneKey:[0,1],
   dispersal:[0,1], seedProv:[0,1], dioecy:[0,1], dormancy:[0,1], myco:[0,1],
 };
 const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
@@ -220,7 +220,7 @@ function acctReset(){ acct = { uni:{h:0,cells:0,inc:0,upk:0,kids:0}, multi:{h:0,
 // ---------- шаблоны формы ----------
 const tplCache = new Map();
 function templateOf(type, a, b) {
-  if (type >= 2) { a = Math.min(a, 5); b = Math.min(b, 5); }
+  // зажима по размеру больше нет: предел телу ставит экономика и ширина чашки
   const key = type + ':' + a + ':' + b;
   if (tplCache.has(key)) return tplCache.get(key);
   let cells = [];
@@ -448,7 +448,13 @@ function mutateAllele(pg, withMacro) {
   if (withMacro && Math.random() < MACRO_MUT_CHANCE) {
     const k = GENES[Math.floor(Math.random()*GENES.length)];
     const [lo,hi] = RANGE[k];
-    g[k] = DISCRETE.includes(k) ? lo + Math.floor(Math.random()*(hi-lo+1)) : lo + Math.random()*(hi-lo);
+    // Размер прыгает КРАТНО, а не в случайную точку диапазона. Потолок у него
+    // теперь далеко (30), и равномерный переброс означал бы, что каждая восьмая
+    // крупная мутация выдаёт план в сотни клеток — это артефакт розыгрыша, а не
+    // мутация. У прочих генов диапазон узкий и осмысленный, там переброс честен.
+    g[k] = (k === 'shapeA' || k === 'shapeB')
+      ? clamp(Math.round(g[k] * (0.5 + Math.random()*1.5)), lo, hi)
+      : (DISCRETE.includes(k) ? lo + Math.floor(Math.random()*(hi-lo+1)) : lo + Math.random()*(hi-lo));
     g.maxN = Math.max(g.maxN, g.minN + 1);
   }
   return g;
@@ -550,7 +556,10 @@ function macroMutate(A, B) {
   if (Math.random() >= MACRO_MUT_CHANCE) return;
   const k = GENES[Math.floor(Math.random()*GENES.length)];
   const [lo,hi] = RANGE[k];
-  const v = DISCRETE.includes(k) ? lo + Math.floor(Math.random()*(hi-lo+1)) : lo + Math.random()*(hi-lo);
+  // размер прыгает кратно — см. пояснение в mutateAllele
+  const v = (k === 'shapeA' || k === 'shapeB')
+    ? clamp(Math.round(((A[k]+B[k])/2) * (0.5 + Math.random()*1.5)), lo, hi)
+    : (DISCRETE.includes(k) ? lo + Math.floor(Math.random()*(hi-lo+1)) : lo + Math.random()*(hi-lo));
   A[k] = v; B[k] = v;
   A.maxN = Math.max(A.maxN, A.minN+1); B.maxN = Math.max(B.maxN, B.minN+1);
 }

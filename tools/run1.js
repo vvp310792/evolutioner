@@ -15,7 +15,7 @@ const f = [
   process.env.LABEL || "-", sd, S.params.light, process.env.PDMG || "0.15",
   process.env.DORM === "0" ? 0 : 1, ext, s.org, s.photo, s.herb, s.pred, s.sapro,
   s.virAvg, s.virSd, s.org ? (s.infected / s.org).toFixed(3) : 0, s.immAvg, s.keySd,
-  s.dormAvg, s.mycoAvg, s.mycoShare, plants.length ? (pdio / plants.length).toFixed(3) : 0,
+  s.dormAvg, s.mycoAvg, s.mycoShare, s.maxSize, plants.length ? (pdio / plants.length).toFixed(3) : 0,
   s.org ? (s.sexN / s.org).toFixed(3) : 0, s.seedN, s.sporeN, s.eggN,
   ((Date.now() - t0) / 1000).toFixed(0),
 ];
