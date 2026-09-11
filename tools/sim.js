@@ -89,6 +89,27 @@ const SEED_OVERHEAD = 0.35;   // оболочка семени — наклад�
 const SEED_FLIGHT = 0.30;     // цена дальнего разлёта, доля от цены потомка
 const SEED_UPKEEP = parseFloat(process.env.SUPK||'0.012');  // семя дышит, запас тает
 const SEED_GERM_LIGHT = parseFloat(process.env.SGL||'0.25'); // ниже этого не всходит, ждёт
+// ── ПОКОЙ (bet-hedging). Раньше всхожесть была детерминированной: условия
+// сошлись — зачаток взошёл. Это и делало банк семян бесполезным ровно там, где
+// он нужен: в рушащемся мире свободных клеток сколько угодно, поэтому ВСЕ семена
+// всходили разом, всходы съедались, и на момент гибели мира в почве лежало ноль
+// семян, ноль спор, ноль икры (замерено на двух вымерших мирах). Страховки не
+// было, потому что зачаток не умел ЖДАТЬ.
+// Теперь ждать он умеет, и насколько — решает ген. Две стороны у одного гена:
+//   всхожесть в час = 10^(-4*dormancy) — глубоко спящий всходит раз в тысячи часов;
+//   расход в покое  = ×(1 - 0.95*dormancy) — спящий почти не дышит и живёт долго.
+// Шкала именно такая глубокая не от балды: при первой версии (0.02^dormancy)
+// даже максимальный покой давал ожидание в 22 часа, а провал популяции длится
+// сотни — банк всё равно опустошался раньше, чем становился нужен.
+// Вторая половина обязательна: покой в природе это ОСТАНОВЛЕННЫЙ обмен, а не
+// упрямство. Без неё глубокий покой означал бы просто «сгнить, не взойдя».
+// Цена покоя не выдумана: спящий уступает свободное место тем, кто всходит сразу.
+// Здесь случайность — не шум поверх решения, а само решение: ставка вслепую на
+// то, что нынешний час хуже будущего. Это тот самый случай, когда детерминизм
+// (правило «поедание без броска кубика») был бы ошибкой.
+const DORM_ON = process.env.DORM !== '0';   // выключатель для контрольного прогона
+const germChance = g => DORM_ON ? Math.pow(10, -4*g.dormancy) : 1;
+const dormUpkeep = g => DORM_ON ? 1 - 0.95*g.dormancy : 1;
 const SEED_DRIFT = 0.02;      // ветер: семя сносит на клетку, само оно не ходит
 const SEED_MAX = parseInt(process.env.SMAX||'3000',10);
 // ── СПОРЫ СТАЛИ ТАКИМИ ЖЕ ЗАЧАТКАМИ, как семена, но с ЗЕРКАЛЬНОЙ экономикой.
@@ -138,17 +159,17 @@ const HFRAC = 0.35, HCAP = 8, HMIN = 0.4;   // доля от энергии ра
 const GENES = ['metab','effic','thresh','costFrac','minN','maxN','aggression','armor',
                'photo','herb','sapro','cycleHours','moveSpeed','lifespan','broodSize',
                'shapeType','shapeA','shapeB','sexual','immunity','immuneKey',
-               'dispersal','seedProv','dioecy'];
+               'dispersal','seedProv','dioecy','dormancy'];
 const RANGE = {
   metab:[0.15,1.7], effic:[0.35,1.0], thresh:[4,40], costFrac:[0.2,0.9],
   minN:[0,4], maxN:[1,8], aggression:[0,1], armor:[0,1], photo:[0,1], herb:[0,1],
   sapro:[0,1], cycleHours:[4,1200], moveSpeed:[0.15,1], lifespan:[100,12000],
   broodSize:[1,4], shapeType:[0,3], shapeA:[1,10], shapeB:[1,10], sexual:[0,1], immunity:[0,1], immuneKey:[0,1],
-  dispersal:[0,1], seedProv:[0,1], dioecy:[0,1],
+  dispersal:[0,1], seedProv:[0,1], dioecy:[0,1], dormancy:[0,1],
 };
 const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
                 photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25, immunity:0.25, immuneKey:0.15,
-                dispersal:0.25, seedProv:0.25, dioecy:0.25 };
+                dispersal:0.25, seedProv:0.25, dioecy:0.25, dormancy:0.25 };
 const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
 
 let state = new Uint8Array(N);        // 0 пусто, 1 живая клетка, 2 труп
@@ -565,6 +586,7 @@ function founderGenome() {
     immuneKey: Math.random(),   // «замок»: какой генотип паразита распознаётся
     dispersal: 0.15+Math.random()*0.2, seedProv: 0.3+Math.random()*0.2,
     dioecy: 0.1+Math.random()*0.2,   // склонность линии быть раздельнополой
+    dormancy: 0.05+Math.random()*0.15,   // глубина покоя зачатка
     shapeType: 0, shapeA: 1, shapeB: 1,          // основатель одноклеточный
   };
 }
@@ -720,7 +742,7 @@ function processSeeds() {
   let w = 0;
   for (let k=0;k<seeds.length;k++) {
     const s = seeds[k];
-    s.energy -= s.kind === 2 ? EGG_UPKEEP : (s.kind ? SPORE_UPKEEP : SEED_UPKEEP);
+    s.energy -= (s.kind === 2 ? EGG_UPKEEP : (s.kind ? SPORE_UPKEEP : SEED_UPKEEP)) * dormUpkeep(s.g);
     if (s.energy <= 0.02) { if (s.kind === 2) stats.eggRot++; else if (s.kind) stats.sporeRot++; else stats.seedRot++; continue; }
     const x = s.i%COLS, y = (s.i/COLS)|0;
     // Семя ждёт СВЕТА, спора ждёт СУБСТРАТА — это и есть разница ниш, перенесённая
@@ -733,7 +755,7 @@ function processSeeds() {
           if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===2) { ready = true; break; } }
       } else ready = vGrad[y]*dayFactor*fertility[s.i] >= SEED_GERM_LIGHT;
     }
-    if (ready && tryPlaceBody(s.g, s.lineage, x, y, s.energy, s.al)) {
+    if (ready && Math.random() < germChance(s.g) && tryPlaceBody(s.g, s.lineage, x, y, s.energy, s.al)) {
       if (s.kind === 2) stats.eggHatch++; else if (s.kind) stats.sporeGerm++; else stats.seedGerm++;
       continue;
     }
@@ -1240,6 +1262,8 @@ function snapshot() {
   // Считается отдельно для половых и клональных линий — в этом вся суть: клон
   // свою гетерозиготность хранит, но никогда не перемешивает.
   const QGEN = GENES.filter(k => !DOMINANT_ONLY.has(k));
+  let dormSum=0;
+  for (const b of bodies.values()) dormSum += b.g.dormancy;
   let dioN=0, maleN=0;
   for (const b of bodies.values()) { if (b.sex) { dioN++; if (b.sex === 'm') maleN++; } }
   let virSum=0, virN=0, virSq=0;
@@ -1258,6 +1282,7 @@ function snapshot() {
   }
   return { hours, org: bodies.size, cells, corpses, sexN, seeds: seeds.length, seedN, sporeN, eggN,
            hetSex: nS? +(hetS/nS).toFixed(4):0, hetAsex: nA? +(hetA/nA).toFixed(4):0, dipN,
+           dormAvg: bodies.size? +(dormSum/bodies.size).toFixed(3):0,
            dioN, maleShare: dioN? +(maleN/dioN).toFixed(3):0,
            gametes: gametes.length, virAvg: +virAvg.toFixed(3), virSd: +virSd.toFixed(3),
            dispAvg: bodies.size? +(dspSum/bodies.size).toFixed(3):0, provAvg: bodies.size? +(prvSum/bodies.size).toFixed(3):0,
@@ -1266,7 +1291,15 @@ function snapshot() {
            effic: bodies.size? (effSum/bodies.size).toFixed(2):'-', shapes };
 }
 
-module.exports = { compatible, get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, get seeds(){ return seeds; }, templateOf, tryPlaceBody, founderGenome,
+// Только для стенда: выкосить нишу целиком и посмотреть, вернётся ли она из
+// банка зачатков. Естественное вымирание ниши в прогоне поймать трудно — оно
+// короткое и совпадает с общим развалом, а здесь условие задаётся ровно.
+function killGuild(name) {
+  let n = 0;
+  for (const b of [...bodies.values()]) if (b.guild === name) { killBody(b, 1); bodies.delete(b.id); n++; }
+  return n;
+}
+module.exports = { killGuild, compatible, get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, get seeds(){ return seeds; }, templateOf, tryPlaceBody, founderGenome,
   get gacct(){ return gacct; }, gReset,
   get acct(){ return acct; }, acctReset,
   get hours(){ return hours; } };
