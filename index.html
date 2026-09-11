@@ -177,7 +177,7 @@
       <div class="scalenote" id="noteMut"></div>
     </div>
     <div class="field">
-      <label>Вирулентность паразитов <b id="lblPar">1.00</b></label>
+      <label>Давление паразитов <b id="lblPar">1.00</b></label>
       <input type="range" id="parasites" min="0" max="300" value="100">
       <div class="scalenote" id="notePar"></div>
     </div>
@@ -219,6 +219,8 @@
       <div class="stat"><span class="k">Схваток / выпасов</span><span class="v" id="sFights">0</span></div>
       <div class="stat"><span class="k">Перемещений</span><span class="v" id="sMoves">0</span></div>
       <div class="stat"><span class="k">Прорастаний конидий</span><span class="v" id="sSpores">0</span></div>
+      <div class="stat"><span class="k">Полы</span><span class="v" id="sSex">0</span></div>
+      <div class="stat"><span class="k">Свирепость штаммов</span><span class="v" id="sVir">0</span></div>
       <div class="stat"><span class="k">Гамет в пути</span><span class="v" id="sGam">0</span></div>
       <div class="stat"><span class="k">Зачатков в почве</span><span class="v" id="sSeeds">0</span></div>
       <div class="stat"><span class="k">Всходов из зачатков</span><span class="v" id="sSeedGerm">0</span></div>
@@ -385,7 +387,16 @@
   // Базовое выздоровление обязательно: при чистом `иммунитет*0.02` и стартовом
   // иммунитете 0.08 болезнь длилась 625 часов, то есть пожизненно, и мир вымирал
   // прежде, чем иммунитет успевал подняться отбором.
-  const PAR_INF = 0.05, PAR_SEED = 0.004, PAR_DMG = 0.03, IMM_COST = 0.06, MATCH_W = 0.15;
+  const PAR_INF = 0.05, PAR_SEED = 0.004, PAR_DMG = 0.15, IMM_COST = 0.06, MATCH_W = 0.15;
+  // ── ВИРУЛЕНТНОСТЬ — ПРИЗНАК ШТАММА и эволюционирует наравне с ключом. Ползунок
+  // остался общим множителем среды, но свирепость каждого штамма теперь его
+  // собственная и наследуется при передаче. Компромисс классический (Андерсон–Мэй):
+  // свирепый штамм заразнее, но быстрее убивает хозяина и обрывает себе же срок
+  // заразности. Отдача от свирепости НАСЫЩАЕТСЯ, вред растёт линейно — иначе
+  // оптимум лёг бы на край шкалы и признак был бы мёртв (замерено на линейной
+  // версии: вирулентность уехала к 1.218 при потолке 1.6 и встала там).
+  const VIR_INF_LO = 0.35, VIR_K = 0.5, VIR_MUT = 0.06, VIR_RANGE = 1.6;
+  const virInf = v => VIR_INF_LO + (1-VIR_INF_LO) * (v/(v+VIR_K));
   const keyDist = (a,b)=>{ const d = Math.abs(a-b); return d < 0.5 ? d : 1-d; };
   // PACE — обмен веществ это СКОРОСТЬ, а не только расход: множитель на весь доход,
   // и на свет, и на еду. Зависимость НАСЫЩАЮЩАЯСЯ (как кинетика фермента), иначе
@@ -422,6 +433,7 @@
     ['immuneKey',  'замок иммунитета',0,1,      'КАКОЙ генотип паразита распознаётся. Паразиту нужно, чтобы его «ключ» подошёл к замку. Ключ мутирует при передаче и догоняет распространённый замок, поэтому выгодно быть редким — это и есть гонка Красной Королевы. Замерено: при вирулентности 1.0 разброс замков держится на 0.295 при теоретическом максимуме 0.289.'],
     ['dispersal',  'дальность зачатка',0,1,    'Работает у фототрофа (семена) и у сапротрофа (половые споры), и только при половом размножении. Задаёт предел разлёта: до 14 клеток у семени и до 30 у споры — спора мелкая, ей решётка почти не тесна. Реальная дальность разыгрывается от 1 до предела, иначе дальняя линия теряла бы ближние места целиком. Дальний бросок дороже, а улетевший за край чашки зачаток пропадает.'],
     ['seedProv',   'запас зачатка',   0,1,     'Сколько энергии вложено в семя или спору. Это и стартовый капитал всхода, и срок покоя: зачаток дышит, запас тает, и когда он кончится — сгнил, не взойдя. У споры запас втрое меньше, зато и дыхание в восемь раз медленнее: она берёт не силой старта, а числом, дальностью и долгим ожиданием субстрата.'],
+    ['dioecy',     'раздельнополость',0,1,     'Только у фототрофа и сапротрофа: с какой вероятностью особь родится ОДНОПОЛОЙ (двудомность) вместо гермафродита (однодомность). У травоядных и хищников пола два всегда — у животных раздельнополость правило, а не выбор. Цена двудомности — половина популяции не носит потомства; выигрыш — специализация: самец делает гаметы вдвое дешевле, самка вынашивает на 15% дешевле гермафродита.'],
     ['sexual',     'половое размн.',  0,1,      'Склонность искать партнёра вместо клонирования. Потомок получает каждый ген от одного из двух родителей броском монеты. Партнёр обязан быть той же ниши и генетически близким — отдельного поля «вид» в коде нет, расхождение по пищевым генам само разводит линии. Не дождавшись партнёра за 48 часов, организм размножается клонально. У фототрофа половое размножение идёт СЕМЕНАМИ, у сапротрофа — СПОРАМИ: потомок не подсаживается вплотную, а забрасывается на расстояние и лежит в почве, пока не откроется место. Семя ждёт света, спора — падали рядом.'],
   ];
   const GENES = GENE_INFO.map(g=>g[0]);
@@ -442,7 +454,7 @@
   const RANGE = {}; GENE_INFO.forEach(g=> RANGE[g[0]] = [g[2],g[3]]);
   const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
                   photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25, immunity:0.25, immuneKey:0.15,
-                  dispersal:0.25, seedProv:0.25 };
+                  dispersal:0.25, seedProv:0.25, dioecy:0.25 };
   const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
   const SHAPE_NAMES = ['квадрат','прямоугольник','круг','овал'];
 
@@ -578,6 +590,15 @@
   // Партнёр должен быть той же ниши и генетически близким. Отдельного поля «вид» нет:
   // расхождение по пищевым генам само разводит линии на нескрещивающиеся группы.
   const SPECIES_GAP = 0.30, MATE_PATIENCE = 48;
+  // Роли пола. Самец НЕ носит зачаток вовсе — весь его вклад это гаметы; самка не
+  // тратится на гаметы и потому вынашивает дешевле; гермафродит умеет и то, и
+  // другое, но без скидок. Это и есть разделение труда, ради которого
+  // раздельнополость существует: цена — половина популяции, не носящая потомства,
+  // выигрыш — специализация каждой половины.
+  const FEM_BEAR_DISCOUNT = 0.85, MALE_GAM_DISCOUNT = 0.5;
+  const bears = b => b.sex !== 'm';
+  const sheds = b => b.sex !== 'f';
+  const sexesFit = (a,b) => !(a.sex === b.sex && a.sex !== null);
   function compatible(a, b){
     if(a.guild !== b.guild) return false;
     const x = a.g, y = b.g;
@@ -646,7 +667,14 @@
     const foot = [];
     for(const [dx,dy] of tpl) foot.push(idx(ox+dx, oy+dy));
     const id = nextBodyId++;
-    const body = { id, g, al: al || { A: g, B: g }, lineage, guild: guildOfGenome(g), ox, oy, tpl, foot,
+    const guild0 = guildOfGenome(g);
+    // ПОЛ. У зверя он есть всегда — раздельнополость у животных правило, а не
+    // выбор. У фототрофа и сапротрофа решает ген `dioecy`: двудомная особь несёт
+    // один пол, однодомная (гермафродит) — оба сразу, как большинство растений
+    // и грибов. Разыгрывается при рождении 50/50 и больше не меняется.
+    const dio = (guild0==='herb' || guild0==='pred') ? true : Math.random() < g.dioecy;
+    const body = { id, g, al: al || { A: g, B: g }, lineage, guild: guild0, ox, oy, tpl, foot,
+                   sex: dio ? (Math.random()<0.5 ? 'm' : 'f') : null,
                    cells:[i0], energy, age:0, cooldown:g.cycleHours };
     state[i0]=1; owner[i0]=id; cellGuild[i0]=GCODE[body.guild];
     const want = Math.min(foot.length, 1 + Math.floor(foot.length/3));  // зачаток — сразу комок
@@ -841,6 +869,7 @@
       aggression: 0.02+Math.random()*0.06, armor: 0.02+Math.random()*0.06,
       photo: 0.55+Math.random()*0.35, herb: 0.02+Math.random()*0.06, sapro: 0.02+Math.random()*0.06,
       dispersal: 0.15+Math.random()*0.2, seedProv: 0.3+Math.random()*0.2,
+      dioecy: 0.1+Math.random()*0.2,           // склонность линии быть раздельнополой
       cycleHours: 14+Math.random()*14, moveSpeed: 0.4+Math.random()*0.4,
       lifespan: 280+Math.random()*350, broodSize: 1,
       shapeType: 0, shapeA: 1, shapeB: 1,      // основатель одноклеточный
@@ -928,6 +957,7 @@
           if(state[ni]!==1) continue;
           const host = bodies.get(owner[ni]);
           if(!host || host.id === q.from || host.cooldown > 0) continue;
+          if(!bears(host)) continue;                     // самец гамету не принимает
           if(host.g.sexual < 0.15 || host.energy < host.g.thresh*0.6) continue;
           if(!gameteFits(q.g, host)) continue;
           if(fertilize(host, q)){ done = true; gamHitCount++; }
@@ -958,9 +988,10 @@
     const cost = prov + childCost*(kind === 2 ? (EGG_OVERHEAD + cg.dispersal*EGG_FLIGHT)
                                  : kind === 1 ? (SPORE_OVERHEAD + cg.dispersal*SPORE_FLIGHT)
                                  : (SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT));
-    if(host.energy < cost + hg.thresh*0.25) return false;
+    const price = cost * (host.sex === 'f' ? FEM_BEAR_DISCOUNT : 1);
+    if(host.energy < price + hg.thresh*0.25) return false;
     if(!launchSeed(host, cg, host.lineage, prov, kind, { A, B })) return false;
-    host.energy -= cost;
+    host.energy -= price;
     host.cooldown = hg.cycleHours;
     sexBirths++;
     return true;
@@ -1053,7 +1084,7 @@
 
       if(body.par && params.parasites > 0){
         body.par.load = Math.min(1, body.par.load + 0.03);
-        body.energy -= body.par.load * params.parasites * size * PAR_DMG;  // крупное тело — крупная мишень
+        body.energy -= body.par.load * body.par.vir * params.parasites * size * PAR_DMG;  // крупное тело — крупная мишень
         if(Math.random() < 0.004 + g.immunity*0.06) body.par = null;
       } else if(params.parasites <= 0) body.par = null;
       const pace = paceOf(g.metab);   // темп обмена: множитель на весь доход
@@ -1295,7 +1326,9 @@
           const cand = bodies.get(owner[ni]);
           if(!cand || cand.cooldown > 0) continue;
           if(cand.energy < cand.g.thresh*0.5) continue;   // партнёр должен быть в силах
-          if(cand.g.sexual < 0.15) continue;              // и сам не быть строго клональным
+          if(cand.g.sexual < 0.15) continue;
+          if(!sexesFit(body, cand)) continue;            // два самца или две самки — не пара
+          if(!bears(body) && !bears(cand)) continue;     // носить зачаток должен хоть кто-то              // и сам не быть строго клональным
           if(!compatible(body, cand)) continue;
           mate = cand;
         }
@@ -1306,8 +1339,8 @@
           // Партнёра рядом нет — вместо пустого ожидания организм ВЫПУСКАЕТ ГАМЕТУ.
           // В этом и смысл подвижной половой клетки: к сидячему фототрофу партнёр
           // не придёт никогда, а гамета дойдёт сама.
-          if(gametes.length < GAMETE_MAX && body.energy > g.thresh*0.6){
-            const gcost = g.thresh * g.costFrac * GAMETE_COST;
+          if(sheds(body) && gametes.length < GAMETE_MAX && body.energy > g.thresh*0.6){
+            const gcost = g.thresh * g.costFrac * GAMETE_COST * (body.sex === 'm' ? MALE_GAM_DISCOUNT : 1);
             if(body.energy > gcost + g.thresh*0.4){
               body.energy -= gcost;
               const c0 = body.cells[Math.floor(Math.random()*body.cells.length)];
@@ -1334,9 +1367,12 @@
         // размножении. Провизия и дальность заявлены генами и оплачены сразу, а
         // место при этом НЕ ищется — в том и смысл, что расселение не упирается
         // в тесноту вокруг родителя.
+        // Носителем становится тот, кто способен носить: самец передаёт эту работу
+        // партнёру целиком, потому и не платит за зачаток.
+        const carrier = mate ? (bears(body) ? body : mate) : body;
         if(mate){
-          const isSpore = body.guild === 'sapro' ? 1 : 0;
-          const kind = (body.guild === 'herb' || body.guild === 'pred') ? 2 : isSpore;
+          const isSpore = carrier.guild === 'sapro' ? 1 : 0;
+          const kind = (carrier.guild === 'herb' || carrier.guild === 'pred') ? 2 : isSpore;
           const prov = childCost * (kind === 2 ? (0.50 + cg.seedProv*EGG_PROV)
                                   : isSpore ? (0.10 + cg.seedProv*SPORE_PROV)
                                   : (0.35 + cg.seedProv*0.8));
@@ -1345,7 +1381,7 @@
             : isSpore ? (SPORE_OVERHEAD + cg.dispersal*SPORE_FLIGHT)
             : (SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT));
           if(body.energy < seedCost*0.5 + g.thresh*0.25 || mate.energy < seedCost*0.5) break;
-          if(!launchSeed(body, cg, body.lineage, prov, kind, kid.al)) break;
+          if(!launchSeed(carrier, cg, carrier.lineage, prov, kind, kid.al)) break;
           body.energy -= seedCost*0.5; mate.energy -= seedCost*0.5; sexBirths++;
           madeAny = true;
           continue;
@@ -1395,9 +1431,10 @@
           const host = bodies.get(owner[ni]);
           if(!host || host.par) continue;
           const fit = keyDist(body.par.key, host.g.immuneKey) < MATCH_W ? 1 : 0.12;
-          if(Math.random() < PAR_INF * fit * (1 - host.g.immunity*0.85)){
+          if(Math.random() < PAR_INF * virInf(body.par.vir) * fit * (1 - host.g.immunity*0.85)){   // заразнее тот, кто свирепее
             let k = body.par.key + (Math.random()*2-1)*0.04;   // ключ мутирует при передаче
-            host.par = { key: k<0?k+1:(k>1?k-1:k), load: 0.05 };
+            const nv = Math.min(VIR_RANGE, Math.max(0, body.par.vir + (Math.random()*2-1)*VIR_MUT));
+            host.par = { key: k<0?k+1:(k>1?k-1:k), vir: nv, load: 0.05 };
             infectCount++;
             break;
           }
@@ -1406,7 +1443,7 @@
       if(bodies.size && Math.random() < PAR_SEED){
         const arr = [...bodies.values()];
         const v = arr[Math.floor(Math.random()*arr.length)];
-        if(!v.par) v.par = { key: Math.random(), load: 0.05 };
+        if(!v.par) v.par = { key: Math.random(), vir: 0.2+Math.random()*0.6, load: 0.05 };
       }
     }
     hours++;
@@ -1553,6 +1590,13 @@
         const bf = isBorder(body,i);
         ctx.fillStyle = cellColor(body, i, bf && body.cells.length>1);
         ctx.fillRect(x*CELL, y*CELL, CELL-1, CELL-1);
+        if(body.sex && bf){
+          // пол виден метками по углам клетки: без этого двудомность существует
+          // только в числах, а на чашке её не разглядеть
+          ctx.fillStyle = body.sex === 'm' ? 'rgba(140,200,255,0.85)' : 'rgba(255,170,210,0.85)';
+          if(body.sex === 'm') ctx.fillRect(x*CELL, y*CELL, 2, 2);
+          else ctx.fillRect(x*CELL+CELL-3, y*CELL+CELL-3, 2, 2);
+        }
         if(body.par){
           // заражение видно точкой: иначе гонка Красной Королевы идёт вслепую
           ctx.fillStyle = `rgba(236,72,153,${(0.35+body.par.load*0.5).toFixed(2)})`;
@@ -1640,6 +1684,14 @@
     set('sDiff', diff);
     set('sSex', bodies.size ? `${sexN} (${Math.round(sexN/bodies.size*100)}%)` : '0');
     set('sSexB', sexBirths);
+    let dioN=0, maleN=0, virS=0, virN=0;
+    for(const b of bodies.values()){
+      if(b.sex){ dioN++; if(b.sex==='m') maleN++; }
+      if(b.par){ virS += b.par.vir; virN++; }
+    }
+    set('sSex', bodies.size ? `${Math.round(dioN/bodies.size*100)}% раздельнополых, самцов ${dioN?Math.round(maleN/dioN*100):0}%` : '0');
+    // средняя свирепость — то, что эволюционирует само; потолок 1.6 для масштаба
+    set('sVir', virN ? `${(virS/virN).toFixed(2)} из 1.60` : '—');
     set('sInf', bodies.size ? `${infN} (${Math.round(infN/bodies.size*100)}%)` : '0');
     // Разброс замков — главный признак гонки Красной Королевы. Для равномерного
     // распределения предел равен 0.289; всё, что около него, означает, что паразит
@@ -1735,6 +1787,10 @@
       + ` · клеток ${size} из ${plan} по плану (${SHAPE_NAMES[Math.round(g.shapeType)]})`
       + ` · барьерных ${size-interior}, внутренних ${interior}`
       + (interior>0 ? ' — <b>дифференцировано</b>' : ' — сердцевины нет, специализации нет')
+      + (b.sex === 'm' ? ' · <b>самец</b> — зачатков не носит, весь вклад через гаметы'
+         : b.sex === 'f' ? ' · <b>самка</b> — гамет не выпускает, вынашивает дешевле'
+         : ' · <b>гермафродит</b> — и выпускает, и вынашивает, но без скидок')
+      + (b.par ? ` · <b>заражён</b>, свирепость штамма ${b.par.vir.toFixed(2)}` : '')
       + (b.al.A === b.al.B
           ? ' · <b>гаплоид</b> — один набор генов, скрывать нечего'
           : ` · <b>диплоид</b>, гетерозиготность ${(heteroOf(b)*100).toFixed(1)}%`

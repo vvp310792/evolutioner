@@ -40,11 +40,26 @@ const SOMA = parseFloat(process.env.SOMA || '0.000008');
 // маловероятно. Ключ мутирует при передаче и потому ДОГОНЯЕТ распространённый
 // замок — отсюда отбор, зависящий от частоты: выгодно быть редким. Это
 // единственный механизм, который ПОДДЕРЖИВАЕТ разброс генов, а не схлопывает его.
-const PAR_VIR  = parseFloat(process.env.PVIR  || '1.0');
+const PAR_VIR  = parseFloat(process.env.PVIR  || '1.0');   // общий множитель среды, не признак штамма
+// ── ВИРУЛЕНТНОСТЬ ТЕПЕРЬ ПРИЗНАК ШТАММА и эволюционирует наравне с ключом.
+// Компромисс — классический trade-off: свирепый штамм заразнее (заразность
+// растёт как VIR_INF_LO + vir), но быстрее убивает хозяина и тем обрывает себе
+// же срок заразности. Без этой связки вирулентность в модели бессмысленна:
+// ползунок задаёт вред, а отбор паразита к нему не имеет отношения.
+// Отдача от вирулентности НАСЫЩАЕТСЯ, а вред растёт линейно — иначе оптимум
+// лежит на краю шкалы и признак мёртв (ровно то, что уже ловили с `metab`).
+// Замерено на линейной версии: вирулентность уехала к 1.218 при потолке 1.6 и
+// стояла там. С насыщением появляется внутренний оптимум — это и есть
+// классический компромисс Андерсона–Мэя: заразность против срока заразности.
+const VIR_INF_LO = 0.35;      // заразность при нулевой вирулентности
+const VIR_K = parseFloat(process.env.VK || '0.5');        // полунасыщение отдачи
+const VIR_MUT = parseFloat(process.env.VMUT || '0.06');   // шаг мутации при передаче
+const VIR_RANGE = 1.6;        // потолок вирулентности штамма
+const virInf = v => VIR_INF_LO + (1-VIR_INF_LO) * (v/(v+VIR_K));
 const PAR_INF  = parseFloat(process.env.PINF  || '0.05');
 const PAR_SEED = parseFloat(process.env.PSEED || '0.004');
 const IMM_COST = parseFloat(process.env.ICOST || '0.06');
-const PAR_DMG  = parseFloat(process.env.PDMG || '0.03');
+const PAR_DMG  = parseFloat(process.env.PDMG || '0.15');   // вред должен быть ощутим, иначе вирулентность бесплатна
 const MATCH_W  = 0.15;
 const keyDist = (a,b) => { const d = Math.abs(a-b); return d < 0.5 ? d : 1-d; };
 // PACE — обмен веществ это СКОРОСТЬ, а не только расход: множитель на весь доход,
@@ -123,17 +138,17 @@ const HFRAC = 0.35, HCAP = 8, HMIN = 0.4;   // доля от энергии ра
 const GENES = ['metab','effic','thresh','costFrac','minN','maxN','aggression','armor',
                'photo','herb','sapro','cycleHours','moveSpeed','lifespan','broodSize',
                'shapeType','shapeA','shapeB','sexual','immunity','immuneKey',
-               'dispersal','seedProv'];
+               'dispersal','seedProv','dioecy'];
 const RANGE = {
   metab:[0.15,1.7], effic:[0.35,1.0], thresh:[4,40], costFrac:[0.2,0.9],
   minN:[0,4], maxN:[1,8], aggression:[0,1], armor:[0,1], photo:[0,1], herb:[0,1],
   sapro:[0,1], cycleHours:[4,1200], moveSpeed:[0.15,1], lifespan:[100,12000],
   broodSize:[1,4], shapeType:[0,3], shapeA:[1,10], shapeB:[1,10], sexual:[0,1], immunity:[0,1], immuneKey:[0,1],
-  dispersal:[0,1], seedProv:[0,1],
+  dispersal:[0,1], seedProv:[0,1], dioecy:[0,1],
 };
 const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
                 photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25, immunity:0.25, immuneKey:0.15,
-                dispersal:0.25, seedProv:0.25 };
+                dispersal:0.25, seedProv:0.25, dioecy:0.25 };
 const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
 
 let state = new Uint8Array(N);        // 0 пусто, 1 живая клетка, 2 труп
@@ -251,6 +266,16 @@ function computeFertility() {
 // Партнёр должен быть той же ниши и генетически близким. Отдельного поля «вид» нет:
 // расхождение по пищевым генам само разводит линии на нескрещивающиеся группы.
 const SPECIES_GAP = 0.30;
+// Роли пола. Мужская особь НЕ носит зачаток вовсе — весь её вклад это гаметы;
+// женская не тратится на гаметы и потому вынашивает дешевле; гермафродит умеет
+// и то, и другое, но без скидок. Это и есть разделение труда, ради которого
+// раздельнополость вообще существует: её цена — половина популяции, не носящая
+// потомства, а выигрыш — специализация каждой половины.
+const FEM_BEAR_DISCOUNT = 0.85;   // женская особь вынашивает дешевле гермафродита
+const MALE_GAM_DISCOUNT = 0.5;    // мужская особь делает гаметы вдвое дешевле
+const bears = b => b.sex !== 'm';         // носит зачатки: женская и гермафродит
+const sheds = b => b.sex !== 'f';         // выпускает гаметы: мужская и гермафродит
+const sexesFit = (a, b) => !(a.sex === b.sex && a.sex !== null);
 const MATE_PATIENCE = parseInt(process.env.MP||'48',10);   // часов ожидания партнёра до клонирования
 function compatible(a, b) {
   if (a.guild !== b.guild) return false;
@@ -284,7 +309,14 @@ function tryPlaceBody(g, lineage, anchorX, anchorY, energy, al) {
   const foot = [];
   for (const [dx,dy] of tpl) foot.push(idx(ox+dx, oy+dy));
   const id = nextBodyId++;
-  const body = { id, g, al: al || { A: g, B: g }, lineage, guild: guildOfGenome(g), ox, oy, tpl,
+  const guild0 = guildOfGenome(g);
+  // ПОЛ. У зверя он есть всегда — раздельнополость у животных правило, а не
+  // выбор. У фототрофа и сапротрофа решает ген `dioecy`: двудомная особь несёт
+  // один пол, однодомная (гермафродит) — оба сразу, как большинство растений и
+  // грибов. Пол разыгрывается при рождении 50/50 и потом не меняется.
+  const dio = (guild0 === 'herb' || guild0 === 'pred') ? true : Math.random() < g.dioecy;
+  const body = { id, g, al: al || { A: g, B: g }, lineage, guild: guild0, ox, oy, tpl,
+                 sex: dio ? (Math.random() < 0.5 ? 'm' : 'f') : null,
                  cells: [i0], foot, energy, age: 0, cooldown: g.cycleHours };
   state[i0] = 1; owner[i0] = id; cellGuild[i0] = GCODE[body.guild];
   // зачаток сразу занимает небольшой комок плана — настолько, насколько есть место
@@ -532,6 +564,7 @@ function founderGenome() {
     immunity: 0.05+Math.random()*0.05,
     immuneKey: Math.random(),   // «замок»: какой генотип паразита распознаётся
     dispersal: 0.15+Math.random()*0.2, seedProv: 0.3+Math.random()*0.2,
+    dioecy: 0.1+Math.random()*0.2,   // склонность линии быть раздельнополой
     shapeType: 0, shapeA: 1, shapeB: 1,          // основатель одноклеточный
   };
 }
@@ -638,6 +671,7 @@ function processGametes() {
         if (state[ni]!==1) continue;
         const host = bodies.get(owner[ni]);
         if (!host || host.id === q.from || host.cooldown > 0) continue;
+        if (!bears(host)) continue;                      // самец гамету не принимает
         if (host.g.sexual < 0.15 || host.energy < host.g.thresh*0.6) continue;
         if (!gameteFits(q.g, host)) continue;
         if (fertilize(host, q)) { fertilized = true; stats.gamHit++; }
@@ -669,9 +703,10 @@ function fertilize(host, q) {
   const cost = prov + childCost*(kind === 2 ? (EGG_OVERHEAD + cg.dispersal*EGG_FLIGHT)
                                : kind === 1 ? (SPORE_OVERHEAD + cg.dispersal*SPORE_FLIGHT)
                                : (SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT));
-  if (host.energy < cost + hg.thresh*0.25) return false;
+  const price = cost * (host.sex === 'f' ? FEM_BEAR_DISCOUNT : 1);
+  if (host.energy < price + hg.thresh*0.25) return false;
   if (!launchSeed(host, cg, host.lineage, prov, kind, { A, B })) return false;
-  host.energy -= cost;
+  host.energy -= price;
   host.cooldown = hg.cycleHours;
   stats.sexBirths++;
   return true;
@@ -768,7 +803,7 @@ function step() {
     // ---- доход ----
     if (body.par) {
       body.par.load = Math.min(1, body.par.load + 0.03);
-      body.energy -= body.par.load * PAR_VIR * size * PAR_DMG;   // крупное тело — крупная мишень
+      body.energy -= body.par.load * body.par.vir * PAR_VIR * size * PAR_DMG;   // крупное тело — крупная мишень
       stats.parHours++;
       // Базовое выздоровление обязательно: при чистом `иммунитет*0.02` и стартовом
       // иммунитете 0.08 срок болезни выходил 625 часов, то есть пожизненно, и мир
@@ -1036,6 +1071,8 @@ function step() {
         if (!cand || cand.cooldown > 0) continue;
         if (cand.energy < cand.g.thresh*0.5) continue;   // партнёр должен быть в силах
         if (cand.g.sexual < 0.15) continue;              // и сам не быть строго клональным
+        if (!sexesFit(body, cand)) continue;             // два самца или две самки — не пара
+        if (!bears(body) && !bears(cand)) continue;      // носить зачаток должен хоть кто-то
         if (!compatible(body, cand)) continue;
         mate = cand;
       }
@@ -1049,8 +1086,8 @@ function step() {
         // Партнёра рядом нет — вместо пустого ожидания организм ВЫПУСКАЕТ ГАМЕТУ.
         // Это и есть смысл подвижной половой клетки: сидячему фототрофу партнёр
         // не дойдёт никогда, а гамета дойдёт.
-        if (GAMETES_ON && gametes.length < GAMETE_MAX && body.energy > g.thresh*0.6) {
-          const gcost = g.thresh * g.costFrac * GAMETE_COST;
+        if (GAMETES_ON && sheds(body) && gametes.length < GAMETE_MAX && body.energy > g.thresh*0.6) {
+          const gcost = g.thresh * g.costFrac * GAMETE_COST * (body.sex === 'm' ? MALE_GAM_DISCOUNT : 1);
           if (body.energy > gcost + g.thresh*0.4) {
             body.energy -= gcost;
             const c0 = body.cells[Math.floor(Math.random()*body.cells.length)];
@@ -1078,9 +1115,12 @@ function step() {
       // ── СЕМЯ вместо подсадки вплотную: только у фототрофа и только при половом
       // размножении. Провизия и дальность заявлены генами и оплачены сразу; место
       // при этом НЕ ищется — в том и смысл, что расселение не упирается в тесноту.
-      const isEgg = EGGS_ON && (body.guild === 'herb' || body.guild === 'pred');
-      if (SEEDS_ON && mate && (body.guild === 'photo' || (SPORESEX_ON && body.guild === 'sapro') || isEgg)) {
-        const isSpore = body.guild === 'sapro' ? 1 : 0;
+      // Носителем становится тот, кто способен носить: самец передаёт эту работу
+      // партнёру целиком, потому и не платит за зачаток.
+      const carrier = mate ? (bears(body) ? body : mate) : body;
+      const isEgg = EGGS_ON && (carrier.guild === 'herb' || carrier.guild === 'pred');
+      if (SEEDS_ON && mate && (carrier.guild === 'photo' || (SPORESEX_ON && carrier.guild === 'sapro') || isEgg)) {
+        const isSpore = carrier.guild === 'sapro' ? 1 : 0;
         const kind = isEgg ? 2 : isSpore;
         const prov = childCost * (kind === 2 ? (0.50 + cg.seedProv*EGG_PROV)
                                 : isSpore ? (0.10 + cg.seedProv*SPORE_PROV)
@@ -1090,7 +1130,7 @@ function step() {
           : isSpore ? (SPORE_OVERHEAD + cg.dispersal*SPORE_FLIGHT)
           : (SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT));
         if (body.energy < seedCost*0.5 + g.thresh*0.25 || mate.energy < seedCost*0.5) break;
-        if (!launchSeed(body, cg, body.lineage, prov, kind, kid.al)) break;
+        if (!launchSeed(carrier, cg, carrier.lineage, prov, kind, kid.al)) break;
         body.energy -= seedCost*0.5; mate.energy -= seedCost*0.5; stats.sexBirths++;
         madeAny = true;
         continue;
@@ -1115,10 +1155,12 @@ function step() {
       const host = bodies.get(owner[ni]);
       if (!host || host.par) continue;
       const fit = keyDist(body.par.key, host.g.immuneKey) < MATCH_W ? 1 : 0.12;
-      if (Math.random() < PAR_INF * fit * (1 - host.g.immunity*0.85)) {
+      // заразнее тот, кто свирепее: в этом и весь компромисс
+      if (Math.random() < PAR_INF * virInf(body.par.vir) * fit * (1 - host.g.immunity*0.85)) {
         let k = body.par.key + (Math.random()*2-1)*0.04;   // ключ мутирует при передаче
         k = k < 0 ? k+1 : (k > 1 ? k-1 : k);
-        host.par = { key: k, load: 0.05 };
+        const v = Math.min(VIR_RANGE, Math.max(0, body.par.vir + (Math.random()*2-1)*VIR_MUT));
+        host.par = { key: k, vir: v, load: 0.05 };
         stats.parInfect++;
         break;
       }
@@ -1127,7 +1169,7 @@ function step() {
   if (bodies.size && Math.random() < PAR_SEED) {
     const arr = [...bodies.values()];
     const v = arr[Math.floor(Math.random()*arr.length)];
-    if (!v.par) { v.par = { key: Math.random(), load: 0.05 }; stats.parSeed++; }
+    if (!v.par) { v.par = { key: Math.random(), vir: 0.2 + Math.random()*0.6, load: 0.05 }; stats.parSeed++; }
   }
   hours++;
 }
@@ -1198,6 +1240,12 @@ function snapshot() {
   // Считается отдельно для половых и клональных линий — в этом вся суть: клон
   // свою гетерозиготность хранит, но никогда не перемешивает.
   const QGEN = GENES.filter(k => !DOMINANT_ONLY.has(k));
+  let dioN=0, maleN=0;
+  for (const b of bodies.values()) { if (b.sex) { dioN++; if (b.sex === 'm') maleN++; } }
+  let virSum=0, virN=0, virSq=0;
+  for (const b of bodies.values()) if (b.par) { virSum += b.par.vir; virSq += b.par.vir*b.par.vir; virN++; }
+  const virAvg = virN ? virSum/virN : 0;
+  const virSd = virN ? Math.sqrt(Math.max(0, virSq/virN - virAvg*virAvg)) : 0;
   let hetS=0, nS=0, hetA=0, nA=0;
   let dipN = 0;
   for (const b of bodies.values()) {
@@ -1210,7 +1258,8 @@ function snapshot() {
   }
   return { hours, org: bodies.size, cells, corpses, sexN, seeds: seeds.length, seedN, sporeN, eggN,
            hetSex: nS? +(hetS/nS).toFixed(4):0, hetAsex: nA? +(hetA/nA).toFixed(4):0, dipN,
-           gametes: gametes.length,
+           dioN, maleShare: dioN? +(maleN/dioN).toFixed(3):0,
+           gametes: gametes.length, virAvg: +virAvg.toFixed(3), virSd: +virSd.toFixed(3),
            dispAvg: bodies.size? +(dspSum/bodies.size).toFixed(3):0, provAvg: bodies.size? +(prvSum/bodies.size).toFixed(3):0,
            infected, immAvg: bodies.size? +(immSum/bodies.size).toFixed(3):0, keySd: +kSd.toFixed(3), sexAvg: bodies.size? +(sexSum/bodies.size).toFixed(3):0,
            lifeSex: nSex? Math.round(lifeSex/nSex):0, lifeAsex: nAsex? Math.round(lifeAsex/nAsex):0, ...gc, multi, diff, maxSize, done: doneCnt,
