@@ -93,6 +93,19 @@ const EGG_UPKEEP = parseFloat(process.env.EUPK||'0.006');
 const EGG_PROV = 1.0, EGG_OVERHEAD = 0.25, EGG_FLIGHT = 0.10;
 const EGG_INCUB = 12, EGG_INCUB_PROV = 60;  // срок развития растёт с желтком
 const EGGS_ON = process.env.EGGS !== '0';
+// ── ГАМЕТА. Единственное гаплоидное, что есть в модели: одна порция генов,
+// пущенная искать вторую. Взрослое тело диплоидно всегда, гаплоидность живёт
+// ровно между мейозом и оплодотворением — как в соматике и положено.
+// Гамета БЫСТРАЯ: три клетки в час против максимум двух у самого прыткого
+// зверя — и это единственное, что вообще движется у сидячих ниш.
+// И она ДЕШЁВАЯ, в отличие от зиготы, которую платит принимающая сторона:
+// отсюда анизогамия — мелкая подвижная гамета против дорогого зачатка, — не
+// объявленная правилом, а вытекшая из того, кто за что платит.
+const GAMETE_SPEED = parseInt(process.env.GSPD||'3',10);
+const GAMETE_LIFE = parseInt(process.env.GLIFE||'36',10);
+const GAMETE_COST = 0.12;          // доля цены потомка
+const GAMETE_MAX = 1200;
+const GAMETES_ON = process.env.GAM !== '0';
 // Старое поле плотности спор осталось отдельной, БЕСПОЛОЙ веткой: оно засевает
 // нишу основательским геномом с нуля. Флаг нужен, чтобы проверить, не оно ли
 // мешает сапротрофам эволюционировать — см. замеры.
@@ -133,6 +146,7 @@ const borderMark = new Uint8Array(N);   // переиспользуемый ма
 let borderBuf = new Int32Array(4096); // переиспользуемый буфер барьерных клеток
 
 let bodies = new Map();
+let gametes = [];   // гаплоидные половые клетки в пути
 let seeds = [];   // зачатки: {i, g, lineage, energy, kind} — 0 семя фототрофа, 1 спора сапротрофа
 let nextBodyId = 1, nextLineageId = 1;
 let hours = 0, phaseX = 0, phaseY = 0, dayFactor = 1;
@@ -142,6 +156,7 @@ function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0
   dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0, parInfect:0, parCleared:0, parSeed:0, parHours:0,
   seedMade:0, seedGerm:0, seedRot:0, seedLost:0, seedWait:0,
   sporeMade:0, sporeGerm:0, sporeRot:0, conidiaKin:0, eggMade:0, eggHatch:0, eggRot:0,
+  gamMade:0, gamHit:0, gamLost:0,
   bornBy:{photo:0,herb:0,pred:0,sapro:0}, diedBy:{photo:0,herb:0,pred:0,sapro:0},
   lifeBy:{photo:0,herb:0,pred:0,sapro:0}, fedBy:{photo:0,herb:0,pred:0,sapro:0} }; }
 let stats = freshStats();
@@ -483,16 +498,19 @@ function macroMutate(A, B) {
 // Сделать диплоидными всех — измерено и отброшено: усреднение гасит шаг мутации
 // у клонального большинства, и ниши перестают возникать (три seed'а из трёх:
 // чистая монокультура фототрофов).
-function gameteOf(b) { return b.al.A === b.al.B ? Object.assign({}, b.al.A) : gamete(b.al); }
+// СОМАТИКА ДИПЛОИДНА, ГАПЛОИДНА ТОЛЬКО ГАМЕТА. Прежняя версия делала гаплоидной
+// целую клональную ЛИНИЮ — это гаплонтный цикл (так живут многие грибы и
+// водоросли), но для зверя он неверен: у животного взрослое тело диплоидно, а
+// один набор несёт только половая клетка. Теперь тело всегда с двумя наборами,
+// а гаплоидность существует ровно там, где ей место — в гамете, между мейозом
+// и оплодотворением.
+function gameteOf(b) { return gamete(b.al); }
 function childGenome(body, mate, wasPred) {
   if (!DIPLOID) {
     const g = mutateGenome(mate ? recombine(body.g, mate.g) : body.g, wasPred);
     return { g, al: { A: g, B: g } };
   }
-  if (!mate && body.al.A === body.al.B) {           // гаплоидный клон — ровно как раньше
-    const g = mutateGenome(body.g, wasPred);
-    return { g, al: { A: g, B: g } };
-  }
+  // Клон — митоз: оба набора копируются как есть, гетерозиготность сохраняется.
   const A = mutateAllele(mate ? gameteOf(body) : body.al.A, false);
   const B = mutateAllele(mate ? gameteOf(mate) : body.al.B, false);
   macroMutate(A, B);
@@ -522,8 +540,11 @@ function founderGenome() {
 // Иначе стартовая популяция полностью гомозиготна, запаса нет ни у кого, и
 // диплоидность первые тысячи часов ничем не отличается от гаплоидности.
 function founderDiploid() {
-  const A = founderGenome();
-  return [A, { A, B: A }];      // гаплоидный основатель: один набор, ссылка на него же
+  // Основатель диплоиден и ГЕТЕРОЗИГОТЕН: два независимых набора. Гомозиготный
+  // старт означал бы, что запаса нет ни у кого и первые тысячи часов
+  // диплоидность ничем не отличается от гаплоидности.
+  const A = founderGenome(), B = founderGenome();
+  return [expressGenome(A, B), { A, B }];
 }
 
 function decayCorpses() {
@@ -569,16 +590,91 @@ function processSpores() {
           const kid = childGenome(src, null, false);
           g = kid.g; al = kid.al; lin = src.lineage;
         } else {
-          g = founderGenome();
-          g.photo = 0.02+Math.random()*0.06; g.sapro = 0.55+Math.random()*0.35;
-          g.cycleHours = 48+Math.random()*100; g.lifespan = 1500+Math.random()*2500;
-          al = { A: g, B: g };      // конидия — тоже гаплоидный засев
+          const mk = () => { const q = founderGenome();
+            q.photo = 0.02+Math.random()*0.06; q.sapro = 0.55+Math.random()*0.35;
+            q.cycleHours = 48+Math.random()*100; q.lifespan = 1500+Math.random()*2500;
+            return q; };
+          const CA = mk(), CB = mk();
+          g = expressGenome(CA, CB); al = { A: CA, B: CB };
           lin = nextLineageId++;
         }
         if (tryPlaceBody(g, lin, gx, gy, 5, al)) { sporeDensity[i]=0; stats.germ++; if (src) stats.conidiaKin++; }
       }
     }
   }
+}
+
+// Гамета совместима с телом, если тело той же ниши и не разошлось по пищевым
+// генам дальше видового зазора — то же правило, что у двух взрослых.
+function gameteFits(hg, b) {
+  if (b.guild !== gGuild(hg)) return false;
+  const y = b.g;
+  return Math.abs(hg.photo-y.photo) <= SPECIES_GAP && Math.abs(hg.herb-y.herb) <= SPECIES_GAP
+      && Math.abs(hg.aggression-y.aggression) <= SPECIES_GAP && Math.abs(hg.sapro-y.sapro) <= SPECIES_GAP;
+}
+const gGuild = g => guildOfGenome(g);
+
+// Гаметы: движение, поиск партнёра, гибель по сроку. Отдельная фаза, потому что
+// гамета — не тело: она не занимает клетку, ничего не ест и никого не кормит.
+function processGametes() {
+  if (!gametes.length) return;
+  let w = 0;
+  for (let k=0;k<gametes.length;k++) {
+    const q = gametes[k];
+    if (++q.age > GAMETE_LIFE) { stats.gamLost++; continue; }
+    let fertilized = false;
+    for (let st=0; st<GAMETE_SPEED && !fertilized; st++) {
+      const x = q.i%COLS, y = (q.i/COLS)|0;
+      // инерция хода: гамета идёт в прежнюю сторону, слегка виляя
+      if (Math.random() < 0.25 || (q.dx===0 && q.dy===0)) {
+        q.dx = (Math.random()*3|0)-1; q.dy = (Math.random()*3|0)-1;
+      }
+      const nx = x+q.dx, ny = y+q.dy;
+      if (nx<0||nx>=COLS||ny<0||ny>=ROWS) { q.dx = -q.dx; q.dy = -q.dy; continue; }
+      q.i = idx(nx,ny);
+      const c = NB8.cnt[q.i], base = q.i*NB8.k;
+      for (let o=0;o<c;o++) {
+        const ni = NB8.tab[base+o];
+        if (state[ni]!==1) continue;
+        const host = bodies.get(owner[ni]);
+        if (!host || host.id === q.from || host.cooldown > 0) continue;
+        if (host.g.sexual < 0.15 || host.energy < host.g.thresh*0.6) continue;
+        if (!gameteFits(q.g, host)) continue;
+        if (fertilize(host, q)) { fertilized = true; stats.gamHit++; }
+        break;
+      }
+    }
+    if (fertilized) continue;
+    gametes[w++] = q;
+  }
+  gametes.length = w;
+}
+
+// Оплодотворение: приходящая гамета становится одним набором, своя — вторым.
+// Зачаток и его цену платит ПРИНИМАЮЩАЯ сторона: она на месте, ей и вынашивать.
+function fertilize(host, q) {
+  const hg = host.g;
+  const perChild = hg.thresh * hg.costFrac;
+  const A = mutateAllele(q.g, false);
+  const B = mutateAllele(gameteOf(host), false);
+  macroMutate(A, B);
+  const cg = expressGenome(A, B);
+  applyPackages(cg, hg, host.guild === 'pred', A, B);
+  const tpl = templateOf(cg.shapeType, cg.shapeA, cg.shapeB).length;
+  const childCost = perChild * (1 + 0.35*(tpl-1));
+  const kind = host.guild === 'photo' ? 0 : host.guild === 'sapro' ? 1 : 2;
+  const prov = childCost * (kind === 2 ? (0.50 + cg.seedProv*EGG_PROV)
+                          : kind === 1 ? (0.10 + cg.seedProv*SPORE_PROV)
+                          : (0.35 + cg.seedProv*0.8));
+  const cost = prov + childCost*(kind === 2 ? (EGG_OVERHEAD + cg.dispersal*EGG_FLIGHT)
+                               : kind === 1 ? (SPORE_OVERHEAD + cg.dispersal*SPORE_FLIGHT)
+                               : (SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT));
+  if (host.energy < cost + hg.thresh*0.25) return false;
+  if (!launchSeed(host, cg, host.lineage, prov, kind, { A, B })) return false;
+  host.energy -= cost;
+  host.cooldown = hg.cycleHours;
+  stats.sexBirths++;
+  return true;
 }
 
 // Семя ждёт СВОЕГО часа: свободной клетки и света. Всхожесть детерминирована —
@@ -647,6 +743,7 @@ function step() {
   decayCorpses();
   processSpores();
   processSeeds();
+  processGametes();
 
   order.length = 0;
   for (const b of bodies.values()) order.push(b);
@@ -949,6 +1046,19 @@ function step() {
       // но возникнув в одиночку — не может закрепиться.
       if (!mate) {
         stats.mateFail++;
+        // Партнёра рядом нет — вместо пустого ожидания организм ВЫПУСКАЕТ ГАМЕТУ.
+        // Это и есть смысл подвижной половой клетки: сидячему фототрофу партнёр
+        // не дойдёт никогда, а гамета дойдёт.
+        if (GAMETES_ON && gametes.length < GAMETE_MAX && body.energy > g.thresh*0.6) {
+          const gcost = g.thresh * g.costFrac * GAMETE_COST;
+          if (body.energy > gcost + g.thresh*0.4) {
+            body.energy -= gcost;
+            const c0 = body.cells[Math.floor(Math.random()*body.cells.length)];
+            gametes.push({ i: c0, g: gameteOf(body), from: body.id, lineage: body.lineage,
+                           age: 0, dx: 0, dy: 0 });
+            stats.gamMade++;
+          }
+        }
         body.mateWait = (body.mateWait || 0) + 1;
         if (body.mateWait < MATE_PATIENCE) continue;   // ещё ждём
         body.mateWait = 0;                             // терпение вышло — клонируемся
@@ -1037,7 +1147,7 @@ function mulberry32(a){ return function(){
 function reset(colonies=24, seed=null) {
   if (seed !== null) Math.random = mulberry32(seed);
   state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
-  seeds.length = 0;
+  seeds.length = 0; gametes.length = 0;
   bodies.clear(); nextBodyId=1; nextLineageId=1; hours=0;
   stats = freshStats();
   // Чашка — плоская плёнка, на которую смотрят СВЕРХУ, поэтому свет равномерен.
@@ -1100,6 +1210,7 @@ function snapshot() {
   }
   return { hours, org: bodies.size, cells, corpses, sexN, seeds: seeds.length, seedN, sporeN, eggN,
            hetSex: nS? +(hetS/nS).toFixed(4):0, hetAsex: nA? +(hetA/nA).toFixed(4):0, dipN,
+           gametes: gametes.length,
            dispAvg: bodies.size? +(dspSum/bodies.size).toFixed(3):0, provAvg: bodies.size? +(prvSum/bodies.size).toFixed(3):0,
            infected, immAvg: bodies.size? +(immSum/bodies.size).toFixed(3):0, keySd: +kSd.toFixed(3), sexAvg: bodies.size? +(sexSum/bodies.size).toFixed(3):0,
            lifeSex: nSex? Math.round(lifeSex/nSex):0, lifeAsex: nAsex? Math.round(lifeAsex/nAsex):0, ...gc, multi, diff, maxSize, done: doneCnt,

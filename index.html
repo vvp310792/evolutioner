@@ -219,6 +219,7 @@
       <div class="stat"><span class="k">Схваток / выпасов</span><span class="v" id="sFights">0</span></div>
       <div class="stat"><span class="k">Перемещений</span><span class="v" id="sMoves">0</span></div>
       <div class="stat"><span class="k">Прорастаний конидий</span><span class="v" id="sSpores">0</span></div>
+      <div class="stat"><span class="k">Гамет в пути</span><span class="v" id="sGam">0</span></div>
       <div class="stat"><span class="k">Зачатков в почве</span><span class="v" id="sSeeds">0</span></div>
       <div class="stat"><span class="k">Всходов из зачатков</span><span class="v" id="sSeedGerm">0</span></div>
       <div class="stat"><span class="k">Многоклеточных</span><span class="v" id="sBodies">0</span></div>
@@ -285,6 +286,7 @@
   let owner = new Int32Array(N);        // id тела, которому принадлежит клетка (0 = ничьё)
   let corpseFood = new Float32Array(N);
   let sporeDensity = new Float32Array(N);
+  let gametes = [];   // гаплоидные половые клетки в пути
   let seeds = [];   // зачатки в почве: {i, g, lineage, energy, kind} — 0 семя, 1 спора
   let fertility = new Float32Array(N);
 
@@ -337,6 +339,12 @@
   const EGG_UPKEEP = 0.006;
   const EGG_PROV = 1.0, EGG_OVERHEAD = 0.25, EGG_FLIGHT = 0.10;
   const EGG_INCUB = 12, EGG_INCUB_PROV = 60;   // срок развития растёт с желтком
+  // ── ГАМЕТА. Единственное гаплоидное, что есть в модели: одна порция генов,
+  // пущенная искать вторую. Гамета БЫСТРАЯ — три клетки в час против максимум
+  // двух у самого прыткого зверя, и это единственное, что движется у сидячих ниш. И ДЕШЁВАЯ, в отличие от зачатка, который платит принимающая
+  // сторона: отсюда анизогамия — мелкая подвижная гамета против дорогой кладки —
+  // не объявлена правилом, а вытекает из того, кто за что платит.
+  const GAMETE_SPEED = 3, GAMETE_LIFE = 36, GAMETE_COST = 0.12, GAMETE_MAX = 1200;
 
   // ─── Специализация клеток по положению в теле. Это НЕ ген: барьерная клетка —
   //     просто та, у которой есть ортогональный сосед не из своего тела. Так же
@@ -796,20 +804,14 @@
     A[k] = v; B[k] = v;
     A.maxN = Math.max(A.maxN, A.minN+1); B.maxN = Math.max(B.maxN, B.minN+1);
   }
-  // ДИПЛОИДНОСТЬ ВОЗНИКАЕТ ИЗ ПОЛА, а не даётся всем даром. Основатель гаплоиден
-  // (`al.A === al.B` — один набор), и пока линия клонируется, она гаплоидна: шаг
-  // мутации у неё полный. Слияние двух гамет даёт ДИПЛОИДА — два набора, среднее
-  // в фенотипе и запас в невыраженном аллеле; дальше линия остаётся диплоидной и
-  // при клональном размножении (митоз копирует оба набора). Вариант «диплоидны
-  // все» замерен и отброшен: усреднение гасит шаг мутации у клонального
-  // большинства, argmax пищевых генов перестаёт переключаться, и три seed'а из
-  // трёх дали чистую монокультуру фототрофов без единого травоядного.
-  function gameteOf(b){ return b.al.A === b.al.B ? Object.assign({}, b.al.A) : gamete(b.al); }
+  // СОМАТИКА ДИПЛОИДНА, ГАПЛОИДНА ТОЛЬКО ГАМЕТА. Прежняя версия делала гаплоидной
+  // целую клональную ЛИНИЮ — это гаплонтный жизненный цикл (так живут многие грибы
+  // и водоросли), но для зверя он неверен: у животного взрослое тело диплоидно, а
+  // один набор несёт лишь половая клетка. Теперь тело всегда с двумя наборами, а
+  // гаплоидность живёт ровно между мейозом и оплодотворением — в гамете.
+  function gameteOf(b){ return gamete(b.al); }
   function childGenome(body, mate, wasPred){
-    if(!mate && body.al.A === body.al.B){          // гаплоидный клон — полный шаг мутации
-      const g = mutateGenome(body.g, wasPred);
-      return { g, al: { A: g, B: g } };
-    }
+    // Клон — митоз: оба набора копируются как есть, гетерозиготность сохраняется.
     const A = mutateAllele(mate ? gameteOf(body) : body.al.A, false);
     const B = mutateAllele(mate ? gameteOf(mate) : body.al.B, false);
     macroMutate(A, B);
@@ -820,10 +822,13 @@
   // Основатель ГЕТЕРОЗИГОТЕН: два независимых набора вместо одного удвоенного —
   // иначе стартовая популяция полностью гомозиготна, запаса нет ни у кого, и
   // диплоидность первые тысячи часов ничем не отличается от гаплоидности.
+  // Основатель диплоиден и ГЕТЕРОЗИГОТЕН: два независимых набора. Гомозиготный
+  // старт означал бы, что запаса нет ни у кого и первые тысячи часов диплоидность
+  // ничем не отличается от гаплоидности.
   function founderDiploid(extra){
-    const A = founderGenome();
-    if(extra) extra(A);
-    return { g: A, al: { A, B: A } };     // гаплоидный основатель: один набор
+    const A = founderGenome(), B = founderGenome();
+    if(extra){ extra(A); extra(B); }
+    return { g: expressGenome(A, B), al: { A, B } };
   }
 
   function founderGenome(){
@@ -888,6 +893,75 @@
         }
       }
     }
+  }
+
+  // Гамета совместима с телом по тому же правилу, что два взрослых: та же ниша и
+  // расхождение по пищевым генам не больше видового зазора.
+  function gameteFits(hg, b){
+    if(b.guild !== guildOfGenome(hg)) return false;
+    const y = b.g;
+    return Math.abs(hg.photo-y.photo) <= SPECIES_GAP && Math.abs(hg.herb-y.herb) <= SPECIES_GAP
+        && Math.abs(hg.aggression-y.aggression) <= SPECIES_GAP && Math.abs(hg.sapro-y.sapro) <= SPECIES_GAP;
+  }
+  // Гаметы: движение, поиск партнёра, гибель по сроку. Отдельная фаза — гамета не
+  // тело: клетку не занимает, не ест и никого не кормит.
+  function processGametes(){
+    if(!gametes.length) return;
+    let w = 0;
+    for(let k=0;k<gametes.length;k++){
+      const q = gametes[k];
+      if(++q.age > GAMETE_LIFE){ gamLostCount++; continue; }
+      let done = false;
+      for(let st=0; st<GAMETE_SPEED && !done; st++){
+        const x = q.i%COLS, y = (q.i/COLS)|0;
+        if(Math.random() < 0.25 || (q.dx===0 && q.dy===0)){   // инерция хода со сбоями
+          q.dx = (Math.random()*3|0)-1; q.dy = (Math.random()*3|0)-1;
+        }
+        const nx = x+q.dx, ny = y+q.dy;
+        if(nx<0||nx>=COLS||ny<0||ny>=ROWS){ q.dx = -q.dx; q.dy = -q.dy; continue; }
+        q.i = idx(nx,ny);
+        const c = NB8.cnt[q.i], base = q.i*NB8.k;
+        for(let o=0;o<c;o++){
+          const ni = NB8.tab[base+o];
+          if(state[ni]!==1) continue;
+          const host = bodies.get(owner[ni]);
+          if(!host || host.id === q.from || host.cooldown > 0) continue;
+          if(host.g.sexual < 0.15 || host.energy < host.g.thresh*0.6) continue;
+          if(!gameteFits(q.g, host)) continue;
+          if(fertilize(host, q)){ done = true; gamHitCount++; }
+          break;
+        }
+      }
+      if(done) continue;
+      gametes[w++] = q;
+    }
+    gametes.length = w;
+  }
+  // Оплодотворение: пришедшая гамета — один набор, своя — второй. Зачаток и его
+  // цену платит ПРИНИМАЮЩАЯ сторона: она на месте, ей и вынашивать.
+  function fertilize(host, q){
+    const hg = host.g;
+    const perChild = hg.thresh * hg.costFrac;
+    const A = mutateAllele(q.g, false);
+    const B = mutateAllele(gameteOf(host), false);
+    macroMutate(A, B);
+    const cg = expressGenome(A, B);
+    applyPackages(cg, hg, host.guild === 'pred', A, B);
+    const tpl = templateOf(cg.shapeType, cg.shapeA, cg.shapeB).length;
+    const childCost = perChild * (1 + 0.35*(tpl-1));
+    const kind = host.guild === 'photo' ? 0 : host.guild === 'sapro' ? 1 : 2;
+    const prov = childCost * (kind === 2 ? (0.50 + cg.seedProv*EGG_PROV)
+                            : kind === 1 ? (0.10 + cg.seedProv*SPORE_PROV)
+                            : (0.35 + cg.seedProv*0.8));
+    const cost = prov + childCost*(kind === 2 ? (EGG_OVERHEAD + cg.dispersal*EGG_FLIGHT)
+                                 : kind === 1 ? (SPORE_OVERHEAD + cg.dispersal*SPORE_FLIGHT)
+                                 : (SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT));
+    if(host.energy < cost + hg.thresh*0.25) return false;
+    if(!launchSeed(host, cg, host.lineage, prov, kind, { A, B })) return false;
+    host.energy -= cost;
+    host.cooldown = hg.cycleHours;
+    sexBirths++;
+    return true;
   }
 
   // Семя ждёт СВОЕГО часа: свободной клетки и света. Всхожесть детерминирована —
@@ -955,6 +1029,7 @@
     decayCorpses();
     processSpores();
     processSeeds();
+    processGametes();
 
     order.length = 0;
     for(const b of bodies.values()) order.push(b);
@@ -1226,6 +1301,18 @@
         // поступают многие реальные виды, и это снимает проблему старта — одинокий
         // половой мутант иначе ждал бы вечно и проигрывал.
         if(!mate){
+          // Партнёра рядом нет — вместо пустого ожидания организм ВЫПУСКАЕТ ГАМЕТУ.
+          // В этом и смысл подвижной половой клетки: к сидячему фототрофу партнёр
+          // не придёт никогда, а гамета дойдёт сама.
+          if(gametes.length < GAMETE_MAX && body.energy > g.thresh*0.6){
+            const gcost = g.thresh * g.costFrac * GAMETE_COST;
+            if(body.energy > gcost + g.thresh*0.4){
+              body.energy -= gcost;
+              const c0 = body.cells[Math.floor(Math.random()*body.cells.length)];
+              gametes.push({ i: c0, g: gameteOf(body), from: body.id, lineage: body.lineage, age: 0, dx: 0, dy: 0 });
+              gamMadeCount++;
+            }
+          }
           body.mateWait = (body.mateWait || 0) + 1;
           if(body.mateWait < MATE_PATIENCE) continue;
           body.mateWait = 0;
@@ -1369,6 +1456,7 @@
     seedMadeCount = 0; seedGermCount = 0; seedRotCount = 0; seedLostCount = 0; seeds.length = 0;
     sporeSexCount = 0; sporeSexGermCount = 0; sporeRotCount = 0;
     eggMadeCount = 0; eggHatchCount = 0; eggRotCount = 0;
+    gamMadeCount = 0; gamHitCount = 0; gamLostCount = 0; gametes.length = 0;
     flashes = []; allExtinctNotified = false; hours = 0; guildsEverSeen = new Set(['photo']);
     const initColonies = parseInt(document.getElementById('initColonies').value,10) || 24;
     let placed=0, guard=0;
@@ -1432,6 +1520,13 @@
     // Семена — зелёные крупинки в почве, того же цвета, что и фототроф: это его
     // потомок, а не отдельная сущность. Яркость = остаток запаса, поэтому видно,
     // как банк семян выцветает к концу покоя.
+    // Гаметы — светлые искры, летящие по чашке. Рисуются под зачатками: гамета
+    // мимолётна, зачаток лежит.
+    for(let k=0;k<gametes.length;k++){
+      const q = gametes[k], x = q.i%COLS, y = (q.i/COLS)|0;
+      ctx.fillStyle = 'rgba(190,230,255,0.55)';
+      ctx.fillRect(x*CELL+3, y*CELL+3, 2, 2);
+    }
     for(let k=0;k<seeds.length;k++){
       const sd = seeds[k]; const x = sd.i%COLS, y = (sd.i/COLS)|0;
       if(state[sd.i] !== 0) continue;
@@ -1535,6 +1630,9 @@
     let seedN = 0, sporeN = 0, eggN = 0;
     for(let k=0;k<seeds.length;k++){ const kk = seeds[k].kind; if(kk===2) eggN++; else if(kk) sporeN++; else seedN++; }
     set('sSeeds', `${seedN} сем. · ${sporeN} спор · ${eggN} икры`);
+    // доля дошедших — главное число про гаметы: видно, что расселение половых
+    // клеток это лотерея, а не доставка
+    set('sGam', `${gametes.length} (дошло ${gamHitCount} из ${gamMadeCount})`);
     // всходы против сгнивших: без второго числа банк зачатков выглядит бесплатным
     set('sSeedGerm', `${seedGermCount}/${seedRotCount} сем. · ${sporeSexGermCount}/${sporeRotCount} спор · ${eggHatchCount}/${eggRotCount} икры`); set('sBodies', multi); set('sMaxBody', maxBody);
     set('sDiff', diff);
