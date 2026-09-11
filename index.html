@@ -1578,24 +1578,30 @@
     // мимолётна, зачаток лежит.
     for(let k=0;k<gametes.length;k++){
       const q = gametes[k], x = q.i%COLS, y = (q.i/COLS)|0;
-      ctx.fillStyle = 'rgba(190,230,255,0.55)';
-      ctx.fillRect(x*CELL+3, y*CELL+3, 2, 2);
+      ctx.fillStyle = 'rgba(190,230,255,0.6)';
+      ctx.fillRect(x*CELL+4, y*CELL+4, 2, 2);   // свой угол: гамета не спорит за место с зачатками
     }
+    // У КАЖДОГО ВИДА ЗАЧАТКА СВОЙ УГОЛ КЛЕТКИ. Зачатки не занимают поверхность —
+    // они лежат в почве, и одна клетка держит их сколько угодно: замерено до
+    // девяти в одной, причём в 439 клетках из 1537 лежали РАЗНЫЕ виды (семя с
+    // икрой, спора с икрой). Пока все рисовались по центру, они перекрывали друг
+    // друга, и смешанная клетка выглядела как одна крупинка. Теперь семя в левом
+    // верхнем углу, спора в правом верхнем, икра внизу — видно, что лежит вместе.
     for(let k=0;k<seeds.length;k++){
       const sd = seeds[k]; const x = sd.i%COLS, y = (sd.i/COLS)|0;
       if(state[sd.i] !== 0) continue;
       if(sd.kind === 2){
         // икра — цвет своей ниши, крупнее прочих зачатков: это дорогая кладка
-        const hb = guildOfGenome(sd.g) === 'pred';
-        ctx.fillStyle = hb ? 'rgba(255,92,122,0.75)' : 'rgba(250,204,21,0.75)';
-        ctx.fillRect(x*CELL+2, y*CELL+2, 4, 4);
-        ctx.fillStyle = 'rgba(12,16,28,0.55)';
-        ctx.fillRect(x*CELL+3, y*CELL+3, 2, 2);
+        ctx.fillStyle = guildOfGenome(sd.g) === 'pred' ? 'rgba(255,92,122,0.8)' : 'rgba(250,204,21,0.8)';
+        ctx.fillRect(x*CELL+1, y*CELL+4, 3, 3);
+        ctx.fillStyle = 'rgba(12,16,28,0.5)';
+        ctx.fillRect(x*CELL+2, y*CELL+5, 1, 1);
+      } else if(sd.kind === 1){
+        ctx.fillStyle = `rgba(176,136,249,${clamp(0.35+sd.energy*0.3, 0.35, 0.85).toFixed(2)})`;   // спора — цвет сапротрофа
+        ctx.fillRect(x*CELL+4, y*CELL+1, 2, 2);
       } else {
-        ctx.fillStyle = sd.kind
-          ? `rgba(176,136,249,${clamp(0.3+sd.energy*0.3, 0.3, 0.8).toFixed(2)})`   // спора — цвет сапротрофа
-          : `rgba(74,222,128,${clamp(0.25+sd.energy*0.09, 0.25, 0.8).toFixed(2)})`; // семя — цвет фототрофа
-        ctx.fillRect(x*CELL+2, y*CELL+2, sd.kind?2:3, sd.kind?2:3);
+        ctx.fillStyle = `rgba(74,222,128,${clamp(0.3+sd.energy*0.09, 0.3, 0.85).toFixed(2)})`;     // семя — цвет фототрофа
+        ctx.fillRect(x*CELL+1, y*CELL+1, 2, 2);
       }
     }
     for(const body of bodies.values()){
