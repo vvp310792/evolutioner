@@ -219,6 +219,7 @@
       <div class="stat"><span class="k">Схваток / выпасов</span><span class="v" id="sFights">0</span></div>
       <div class="stat"><span class="k">Перемещений</span><span class="v" id="sMoves">0</span></div>
       <div class="stat"><span class="k">Прорастаний конидий</span><span class="v" id="sSpores">0</span></div>
+      <div class="stat"><span class="k">Грибоядность зверей</span><span class="v" id="sMyco">—</span></div>
       <div class="stat"><span class="k">Полы</span><span class="v" id="sSex">0</span></div>
       <div class="stat"><span class="k">Свирепость штаммов</span><span class="v" id="sVir">0</span></div>
       <div class="stat"><span class="k">Гамет в пути</span><span class="v" id="sGam">0</span></div>
@@ -377,6 +378,16 @@
   // детрит — между ними.
   const ASSIM_CAP = 0.9;
   const ASSIM_BASE = { herb: 0.70, pred: 0.88, sapro: 0.80 };
+  // ── ФАКУЛЬТАТИВНАЯ ГРИБОЯДНОСТЬ. Живого сапротрофа раньше не ел никто: цепь была
+  // объявлена как фототроф -> травоядное -> хищник, а гриб замыкал оборот через
+  // трупы. По архиву прогонов в тупике оказывалось 40% живой биомассы (медиана по
+  // 141 миру), в бедных мирах до 57%. В природе так не бывает — грибы едят
+  // ногохвостки, клещи, слизни, кабаны, белки, и грибоядность у насекомых
+  // возникала независимо десятки раз.
+  // Это НЕ пятая ниша: ниша по-прежнему argmax пищевых генов, а `myco` лишь
+  // добавляет грибы в меню. Поэтому коррелированный пакет ей не нужен — малая
+  // грибоядность полезна сразу, порога окупаемости у неё нет.
+  const ASSIM_MYCO = 0.78, MYCO_COST = 0.04;
   const GROWTH_COST_FRAC = 0.20;
   const GRAZE_LEFT = 0.12;   // от съеденного растения остаётся лишь остаток, а не полный труп
   const SAT = 1.0;           // насколько час кормёжки должен окупать расходы, чтобы остаться
@@ -446,6 +457,7 @@
     ['immuneKey',  'замок иммунитета',0,1,      'КАКОЙ генотип паразита распознаётся. Паразиту нужно, чтобы его «ключ» подошёл к замку. Ключ мутирует при передаче и догоняет распространённый замок, поэтому выгодно быть редким — это и есть гонка Красной Королевы. Замерено: при вирулентности 1.0 разброс замков держится на 0.295 при теоретическом максимуме 0.289.'],
     ['dispersal',  'дальность зачатка',0,1,    'Работает у фототрофа (семена) и у сапротрофа (половые споры), и только при половом размножении. Задаёт предел разлёта: до 14 клеток у семени и до 30 у споры — спора мелкая, ей решётка почти не тесна. Реальная дальность разыгрывается от 1 до предела, иначе дальняя линия теряла бы ближние места целиком. Дальний бросок дороже, а улетевший за край чашки зачаток пропадает.'],
     ['seedProv',   'запас зачатка',   0,1,     'Сколько энергии вложено в семя или спору. Это и стартовый капитал всхода, и срок покоя: зачаток дышит, запас тает, и когда он кончится — сгнил, не взойдя. У споры запас втрое меньше, зато и дыхание в восемь раз медленнее: она берёт не силой старта, а числом, дальностью и долгим ожиданием субстрата.'],
+    ['myco',       'грибоядность',    0,1,     'Только у травоядного и хищника. С какой вероятностью живой сапротроф попадает в список целей — то есть насколько зверь готов есть грибы вдобавок к своей обычной еде. Ниши не меняет: кто ты есть, по-прежнему решает наибольший из четырёх пищевых генов. Гриб едят ВЫПАСОМ, а не охотой — ни брони, ни силы удара, только доля откушенной массы; усвоение 0.78, между травой и мясом. Ферменты для хитина стоят апкипа. У основателей ген равен нулю: грибоядность обязана возникнуть мутацией, как ниши и пол.'],
     ['dormancy',   'глубина покоя',   0,1,     'Насколько зачаток готов ЖДАТЬ вместо того, чтобы взойти при первой возможности. Всхожесть в час = 10^(−4×dormancy) — от «сразу» до раза в тысячи часов, — а расход в покое падает до одной двадцатой: спящее семя почти не дышит и потому живёт долго. Цена — спящий уступает свободное место тем, кто всходит сразу. Это ставка вслепую на то, что нынешний час хуже будущего: без неё банк семян осушался ровно тогда, когда он нужнее всего — в рушащемся мире свободных клеток сколько угодно, и всходили ВСЕ разом.'],
     ['dioecy',     'раздельнополость',0,1,     'Только у фототрофа и сапротрофа: с какой вероятностью особь родится ОДНОПОЛОЙ (двудомность) вместо гермафродита (однодомность). У травоядных и хищников пола два всегда — у животных раздельнополость правило, а не выбор. Цена двудомности — половина популяции не носит потомства; выигрыш — специализация: самец делает гаметы вдвое дешевле, самка вынашивает на 15% дешевле гермафродита.'],
     ['sexual',     'половое размн.',  0,1,      'Склонность искать партнёра вместо клонирования. Потомок получает каждый ген от одного из двух родителей броском монеты. Партнёр обязан быть той же ниши и генетически близким — отдельного поля «вид» в коде нет, расхождение по пищевым генам само разводит линии. Не дождавшись партнёра за 48 часов, организм размножается клонально. У фототрофа половое размножение идёт СЕМЕНАМИ, у сапротрофа — СПОРАМИ: потомок не подсаживается вплотную, а забрасывается на расстояние и лежит в почве, пока не откроется место. Семя ждёт света, спора — падали рядом.'],
@@ -468,7 +480,7 @@
   const RANGE = {}; GENE_INFO.forEach(g=> RANGE[g[0]] = [g[2],g[3]]);
   const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, armor:0.25,
                   photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25, immunity:0.25, immuneKey:0.15,
-                  dispersal:0.25, seedProv:0.25, dioecy:0.25, dormancy:0.25 };
+                  dispersal:0.25, seedProv:0.25, dioecy:0.25, dormancy:0.25, myco:0.25 };
   const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
   const SHAPE_NAMES = ['квадрат','прямоугольник','круг','овал'];
 
@@ -885,6 +897,7 @@
       dispersal: 0.15+Math.random()*0.2, seedProv: 0.3+Math.random()*0.2,
       dioecy: 0.1+Math.random()*0.2,           // склонность линии быть раздельнополой
       dormancy: 0.05+Math.random()*0.15,       // глубина покоя зачатка
+      myco: 0,                                 // грибоядность — только мутацией
       cycleHours: 14+Math.random()*14, moveSpeed: 0.4+Math.random()*0.4,
       lifespan: 280+Math.random()*350, broodSize: 1,
       shapeType: 0, shapeA: 1, shapeB: 1,      // основатель одноклеточный
@@ -1134,7 +1147,7 @@
       const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
                    + crowdSame*0.045 + (crowd-crowdSame)*0.006 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax
                    + size*g.lifespan*SOMA      // содержание долговечного тела
-                   + size*g.immunity*IMM_COST; // иммунитет тоже надо содержать
+                   + size*g.immunity*IMM_COST + size*g.myco*MYCO_COST; // иммунитет тоже надо содержать
       body.energy -= upkeep;
       if(body.energy <= 0){ killBody(body); continue; }           // гибнет ЦЕЛИКОМ: общий пул исчерпан
 
@@ -1162,11 +1175,27 @@
             else if(state[ni]===1 && owner[ni]!==myId){
               const gq = cellGuild[ni];
               if(mode===G_PRED ? (gq===G_HERB||gq===G_PRED) : gq===G_PHOTO) targets.push(ni);
+              else if(gq===G_SAPRO && Math.random() < g.myco) targets.push(ni);   // грибы в меню зверя
             } } }
 
         if(targets.length){
           const tgt = targets[Math.floor(Math.random()*targets.length)];
-          if(body.guild==='pred' && params.predation){
+          // Гриб едят ВЫПАСОМ, а не охотой: кабан с грибом не дерётся — ни брони,
+          // ни силы удара, только доля откушенной массы.
+          if(cellGuild[tgt] === G_SAPRO && (mode===G_HERB || mode===G_PRED)){
+            const assimM = Math.min(ASSIM_CAP, ASSIM_MYCO * g.effic * processing) * pace;
+            for(let bi=0; bi<bites; bi++){
+              const victim = bodies.get(owner[tgt]);
+              if(!victim) break;
+              const bite = Math.min(0.55, g.myco*HFRAC);
+              let drain = Math.max(victim.energy*bite, g.myco*HMIN);
+              drain = Math.min(drain, victim.energy, g.myco*HCAP*Math.sqrt(size));
+              victim.energy -= drain;
+              body.energy += drain*assimM - 0.12; gained += drain*assimM; ate = true;
+              actionCount++;
+              if(victim.energy <= 0){ flashes.push({i:tgt, life:6}); killBody(victim, GRAZE_LEFT); }
+            }
+          } else if(body.guild==='pred' && params.predation){
             ate = true;   // добыча в пределах досягаемости: дерёмся, а не уходим
             for(let bi=0; bi<bites; bi++) if(Math.random() < g.aggression*0.65){
               const victim = bodies.get(owner[tgt]);
@@ -1259,7 +1288,8 @@
             const ni = idx(nx,ny);
             if(state[ni]!==1 || owner[ni]===myId) continue;
             const gq = cellGuild[ni];
-            if(seekPred ? (gq===G_HERB||gq===G_PRED) : gq===G_PHOTO){ found=[dx,dy]; break; } }
+            if(seekPred ? (gq===G_HERB||gq===G_PRED) : gq===G_PHOTO){ found=[dx,dy]; break; }
+            if(gq===G_SAPRO && Math.random() < g.myco){ found=[dx,dy]; break; } }   // грибоядный идёт и к грибу
           let sx, sy;
           if(found){ sx=Math.sign(found[0]); sy=Math.sign(found[1]); }
           else {
@@ -1710,6 +1740,11 @@
       if(b.sex){ dioN++; if(b.sex==='m') maleN++; }
       if(b.par){ virS += b.par.vir; virN++; }
     }
+    let mycoN=0, mycoHigh=0, mycoSum=0;
+    for(const b of bodies.values()) if(b.guild==='herb'||b.guild==='pred'){ mycoN++; mycoSum+=b.g.myco; if(b.g.myco>0.4) mycoHigh++; }
+    // грибоядность показывается отдельно: ниша по ней не меняется, и в раскладке
+    // по нишам такой зверь неотличим от обычного
+    set('sMyco', mycoN ? `${(mycoSum/mycoN).toFixed(2)} · микофагов ${Math.round(100*mycoHigh/mycoN)}%` : '—');
     set('sSex', bodies.size ? `${Math.round(dioN/bodies.size*100)}% раздельнополых, самцов ${dioN?Math.round(maleN/dioN*100):0}%` : '0');
     // средняя свирепость — то, что эволюционирует само; потолок 1.6 для масштаба
     set('sVir', virN ? `${(virS/virN).toFixed(2)} из 1.60` : '—');
