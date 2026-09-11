@@ -83,6 +83,16 @@ const SEED_MAX = parseInt(process.env.SMAX||'3000',10);
 const SPORE_RANGE = parseInt(process.env.SPRANGE||'30',10);
 const SPORE_UPKEEP = parseFloat(process.env.SPUPK||'0.0015');
 const SPORE_PROV = 0.25, SPORE_OVERHEAD = 0.12, SPORE_FLIGHT = 0.10;
+// ── ИКРА. Третий вид зачатка, для травоядных и хищников. Зверь не разбрасывает
+// потомство по ветру и не ждёт субстрата: он ОТКЛАДЫВАЕТ кладку рядом с собой, и
+// она развивается СВОЙ СРОК, а не до первого подходящего часа. Поэтому у икры
+// условие всхода не внешнее (свет, падаль), а внутреннее — инкубация.
+// Желток богаче семени: вылупиться должен не росток, а сразу подвижный зверь.
+const EGG_RANGE = 4;                       // кладка рядом, а не за тридевять клеток
+const EGG_UPKEEP = parseFloat(process.env.EUPK||'0.006');
+const EGG_PROV = 1.0, EGG_OVERHEAD = 0.25, EGG_FLIGHT = 0.10;
+const EGG_INCUB = 12, EGG_INCUB_PROV = 60;  // срок развития растёт с желтком
+const EGGS_ON = process.env.EGGS !== '0';
 // Старое поле плотности спор осталось отдельной, БЕСПОЛОЙ веткой: оно засевает
 // нишу основательским геномом с нуля. Флаг нужен, чтобы проверить, не оно ли
 // мешает сапротрофам эволюционировать — см. замеры.
@@ -131,7 +141,7 @@ let params = { mutation: 0.12, decomp: 0.3, light: 0.62, predation: true, dayNig
 function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0,
   dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0, parInfect:0, parCleared:0, parSeed:0, parHours:0,
   seedMade:0, seedGerm:0, seedRot:0, seedLost:0, seedWait:0,
-  sporeMade:0, sporeGerm:0, sporeRot:0, conidiaKin:0,
+  sporeMade:0, sporeGerm:0, sporeRot:0, conidiaKin:0, eggMade:0, eggHatch:0, eggRot:0,
   bornBy:{photo:0,herb:0,pred:0,sapro:0}, diedBy:{photo:0,herb:0,pred:0,sapro:0},
   lifeBy:{photo:0,herb:0,pred:0,sapro:0}, fedBy:{photo:0,herb:0,pred:0,sapro:0} }; }
 let stats = freshStats();
@@ -243,7 +253,7 @@ function guildOfGenome(g) {
 }
 
 // ---------- организм ----------
-function tryPlaceBody(g, lineage, anchorX, anchorY, energy) {
+function tryPlaceBody(g, lineage, anchorX, anchorY, energy, al) {
   const tpl = templateOf(g.shapeType, g.shapeA, g.shapeB);
   const [sdx, sdy] = tpl[0];                 // первая клетка шаблона — центр
   const ox = anchorX - sdx, oy = anchorY - sdy;
@@ -259,7 +269,7 @@ function tryPlaceBody(g, lineage, anchorX, anchorY, energy) {
   const foot = [];
   for (const [dx,dy] of tpl) foot.push(idx(ox+dx, oy+dy));
   const id = nextBodyId++;
-  const body = { id, g, lineage, guild: guildOfGenome(g), ox, oy, tpl,
+  const body = { id, g, al: al || { A: g, B: g }, lineage, guild: guildOfGenome(g), ox, oy, tpl,
                  cells: [i0], foot, energy, age: 0, cooldown: g.cycleHours };
   state[i0] = 1; owner[i0] = id; cellGuild[i0] = GCODE[body.guild];
   // зачаток сразу занимает небольшой комок плана — настолько, насколько есть место
@@ -338,7 +348,7 @@ function recombine(ga, gb) {
   return g;
 }
 
-function mutateGenome(pg, wasPred) {
+function mutateAllele(pg, withMacro) {
   const m = params.mutation, g = {};
   for (const k of GENES) g[k] = pg[k];
   for (const k of Object.keys(DRIFT)) {
@@ -352,12 +362,47 @@ function mutateGenome(pg, wasPred) {
   if (Math.random() < m*0.25) g.shapeType = Math.floor(Math.random()*4);
   g.maxN = Math.max(g.maxN, g.minN + 1);
   // крупная мутация: ОДИН случайный ген из ВСЕХ перебрасывается целиком (п.1)
-  if (Math.random() < MACRO_MUT_CHANCE) {
+  if (withMacro && Math.random() < MACRO_MUT_CHANCE) {
     const k = GENES[Math.floor(Math.random()*GENES.length)];
     const [lo,hi] = RANGE[k];
     g[k] = DISCRETE.includes(k) ? lo + Math.floor(Math.random()*(hi-lo+1)) : lo + Math.random()*(hi-lo);
     g.maxN = Math.max(g.maxN, g.minN + 1);
   }
+  return g;
+}
+
+// ── ДИПЛОИДНОСТЬ. Два набора аллелей на организм, выражается их СРЕДНЕЕ (кроме
+// двух генов ниже). Смысл не в удвоении памяти, а в том, что у полового организма
+// появляется НЕВЫРАЖЕННЫЙ запас: аллель может быть далеко от фенотипа и пережить
+// в гетерозиготе времена, когда он вреден. Гаплоидная схема этого не умеет —
+// там что в геноме, то и в теле.
+// Бесполое размножение копирует ОБА набора как есть (митоз), поэтому клональная
+// линия навсегда сохраняет свою гетерозиготность, но никогда её не перемешивает;
+// половое — собирает по гамете от каждого родителя (мейоз с расщеплением).
+const DIPLOID = process.env.DIPLO !== '0';
+// Среднее осмысленно не для всех генов: тип формы — это КАТЕГОРИЯ (среднее между
+// квадратом и овалом — не форма), а замок иммунитета живёт на окружности, где
+// среднее между 0.05 и 0.95 даёт 0.5, то есть максимально далёкое от обоих.
+// Для них — полное доминирование: выражается аллель A, второй лежит запасом.
+const DOMINANT_ONLY = new Set(['shapeType','immuneKey']);
+function expressGenome(A, B) {
+  const g = {};
+  for (const k of GENES) g[k] = DOMINANT_ONLY.has(k) ? A[k] : (A[k] + B[k]) * 0.5;
+  for (const k of DISCRETE) if (!DOMINANT_ONLY.has(k)) g[k] = Math.round(g[k]);
+  g.maxN = Math.max(g.maxN, g.minN + 1);
+  return g;
+}
+function gamete(al) {
+  const h = {};
+  for (const k of GENES) h[k] = Math.random() < 0.5 ? al.A[k] : al.B[k];
+  return h;
+}
+
+// Пакеты (хищник, многоклеточность, смена ниши, основание половой линии) работают
+// по ФЕНОТИПУ и записываются обратно в ОБА аллеля: иначе подъём, ради которого
+// пакет существует, не наследуется и рассосётся в первом же поколении.
+function applyPackages(g, pg, wasPred, A, B) {
+  const before = A && B ? Object.assign({}, g) : null;
   g.__endow = 0;
   // Пакет СМЕНЫ НИШИ. Мутант-травоядное наследует photo~0.8 и получает herb~0.85 —
   // перевес пограничный, и его потомки тут же сваливаются обратно в фототрофы.
@@ -401,7 +446,59 @@ function mutateGenome(pg, wasPred) {
   }
   // тот же принцип для многоклеточности: линия, впервые строящая тело, должна
   // успеть его построить — иначе одноклеточные потомки всегда обгоняют её по размножению
+  // В зародышевую линию пишется ТОЛЬКО то, что пакет реально поднял. Первая версия
+  // писала обратно весь фенотип целиком — и стирала всю гетерозиготность в каждом
+  // поколении: аллели A и B становились побитово одинаковыми, диплоидность
+  // превращалась в гаплоидность с двойным расходом памяти (замерено: средняя
+  // разница аллелей по lifespan ровно 0 на 3000-м часу).
+  if (before) for (const k of GENES) if (g[k] !== before[k]) { A[k] = g[k]; B[k] = g[k]; }
   return g;
+}
+
+function mutateGenome(pg, wasPred) { return applyPackages(mutateAllele(pg, true), pg, wasPred); }
+
+// КРУПНАЯ МУТАЦИЯ В ДИПЛОИДЕ ИДЁТ ПО ОБОИМ АЛЛЕЛЯМ. Иначе она наполовину гасится
+// усреднением, argmax пищевых генов перестаёт переключаться — и ниши не возникают
+// вовсе. Замерено ровно это: три seed'а из трёх дали чистую монокультуру
+// фототрофов (929/1251/1218 тел, ни одного травоядного, хищника и сапротрофа) и
+// ноль половых линий, потому что и `sexual` не дотягивал до порога 0.5.
+// Мелкий дрейф при этом остаётся ПОАЛЛЕЛЬНЫМ — он и создаёт скрытый запас.
+function macroMutate(A, B) {
+  if (Math.random() >= MACRO_MUT_CHANCE) return;
+  const k = GENES[Math.floor(Math.random()*GENES.length)];
+  const [lo,hi] = RANGE[k];
+  const v = DISCRETE.includes(k) ? lo + Math.floor(Math.random()*(hi-lo+1)) : lo + Math.random()*(hi-lo);
+  A[k] = v; B[k] = v;
+  A.maxN = Math.max(A.maxN, A.minN+1); B.maxN = Math.max(B.maxN, B.minN+1);
+}
+
+// Единая точка сборки генома потомка: и гаплоидный путь, и диплоидный.
+// ДИПЛОИДНОСТЬ ВОЗНИКАЕТ ИЗ ПОЛА, а не даётся всем даром. Основатель гаплоиден
+// (`al.A === al.B` — один набор), и пока линия клонируется, она гаплоидна: шаг
+// мутации у неё полный, как был. Слияние двух гамет даёт ДИПЛОИДА — два набора,
+// среднее в фенотипе и запас в невыраженном аллеле. Дальше эта линия остаётся
+// диплоидной и при клональном размножении (митоз копирует оба набора).
+// Так устроены реальные жизненные циклы с чередованием поколений, и так
+// диплоидность что-то ЗНАЧИТ в модели: это плата и приз за пол разом.
+// Сделать диплоидными всех — измерено и отброшено: усреднение гасит шаг мутации
+// у клонального большинства, и ниши перестают возникать (три seed'а из трёх:
+// чистая монокультура фототрофов).
+function gameteOf(b) { return b.al.A === b.al.B ? Object.assign({}, b.al.A) : gamete(b.al); }
+function childGenome(body, mate, wasPred) {
+  if (!DIPLOID) {
+    const g = mutateGenome(mate ? recombine(body.g, mate.g) : body.g, wasPred);
+    return { g, al: { A: g, B: g } };
+  }
+  if (!mate && body.al.A === body.al.B) {           // гаплоидный клон — ровно как раньше
+    const g = mutateGenome(body.g, wasPred);
+    return { g, al: { A: g, B: g } };
+  }
+  const A = mutateAllele(mate ? gameteOf(body) : body.al.A, false);
+  const B = mutateAllele(mate ? gameteOf(mate) : body.al.B, false);
+  macroMutate(A, B);
+  const g = expressGenome(A, B);
+  applyPackages(g, body.g, wasPred, A, B);
+  return { g, al: { A, B } };
 }
 
 function founderGenome() {
@@ -419,6 +516,14 @@ function founderGenome() {
     dispersal: 0.15+Math.random()*0.2, seedProv: 0.3+Math.random()*0.2,
     shapeType: 0, shapeA: 1, shapeB: 1,          // основатель одноклеточный
   };
+}
+
+// Основатель ГЕТЕРОЗИГОТЕН: два независимых набора вместо одного удвоенного.
+// Иначе стартовая популяция полностью гомозиготна, запаса нет ни у кого, и
+// диплоидность первые тысячи часов ничем не отличается от гаплоидности.
+function founderDiploid() {
+  const A = founderGenome();
+  return [A, { A, B: A }];      // гаплоидный основатель: один набор, ссылка на него же
 }
 
 function decayCorpses() {
@@ -459,15 +564,18 @@ function processSpores() {
           for (let o=0;o<c;o++) { const ni = NB24.tab[base+o];
             if (state[ni]===1 && cellGuild[ni]===G_SAPRO) { const b = bodies.get(owner[ni]); if (b) { src = b; break; } } }
         }
-        let g;
-        if (src) { g = mutateGenome(src.g, false); lin = src.lineage; }
-        else {
+        let g, al = null;
+        if (src) {
+          const kid = childGenome(src, null, false);
+          g = kid.g; al = kid.al; lin = src.lineage;
+        } else {
           g = founderGenome();
           g.photo = 0.02+Math.random()*0.06; g.sapro = 0.55+Math.random()*0.35;
           g.cycleHours = 48+Math.random()*100; g.lifespan = 1500+Math.random()*2500;
+          al = { A: g, B: g };      // конидия — тоже гаплоидный засев
           lin = nextLineageId++;
         }
-        if (tryPlaceBody(g, lin, gx, gy, 5)) { sporeDensity[i]=0; stats.germ++; if (src) stats.conidiaKin++; }
+        if (tryPlaceBody(g, lin, gx, gy, 5, al)) { sporeDensity[i]=0; stats.germ++; if (src) stats.conidiaKin++; }
       }
     }
   }
@@ -481,26 +589,27 @@ function processSeeds() {
   let w = 0;
   for (let k=0;k<seeds.length;k++) {
     const s = seeds[k];
-    s.energy -= s.kind ? SPORE_UPKEEP : SEED_UPKEEP;
-    if (s.energy <= 0.02) { if (s.kind) stats.sporeRot++; else stats.seedRot++; continue; }
+    s.energy -= s.kind === 2 ? EGG_UPKEEP : (s.kind ? SPORE_UPKEEP : SEED_UPKEEP);
+    if (s.energy <= 0.02) { if (s.kind === 2) stats.eggRot++; else if (s.kind) stats.sporeRot++; else stats.seedRot++; continue; }
     const x = s.i%COLS, y = (s.i/COLS)|0;
     // Семя ждёт СВЕТА, спора ждёт СУБСТРАТА — это и есть разница ниш, перенесённая
     // на стадию покоя: фототрофу нужно куда встать под солнцем, грибу — на чём расти.
     let ready = false;
     if (state[s.i] === 0) {
-      if (s.kind) {
+      if (s.kind === 2) ready = (++s.age) >= s.incub;     // икра ждёт СВОЙ срок, а не погоду
+      else if (s.kind === 1) {
         for (const [dx,dy] of noff) { const nx=x+dx, ny=y+dy;
           if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===2) { ready = true; break; } }
       } else ready = vGrad[y]*dayFactor*fertility[s.i] >= SEED_GERM_LIGHT;
     }
-    if (ready && tryPlaceBody(s.g, s.lineage, x, y, s.energy)) {
-      if (s.kind) stats.sporeGerm++; else stats.seedGerm++;
+    if (ready && tryPlaceBody(s.g, s.lineage, x, y, s.energy, s.al)) {
+      if (s.kind === 2) stats.eggHatch++; else if (s.kind) stats.sporeGerm++; else stats.seedGerm++;
       continue;
     }
     stats.seedWait++;
     // ветер сносит семя — это свойство мира, а не признак семени: своего движения
     // у семени нет, иначе оно дублировало бы moveSpeed и стало бы просто зверем
-    if (Math.random() < SEED_DRIFT) {
+    if (s.kind !== 2 && Math.random() < SEED_DRIFT) {
       const nx = x + (Math.random()*3|0) - 1, ny = y + (Math.random()*3|0) - 1;
       if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS) s.i = idx(nx,ny);
     }
@@ -512,17 +621,19 @@ function processSeeds() {
 // Запуск семени: точка приземления берётся от случайной клетки родителя, дальность
 // — из гена, но РОЗЫГРЫШЕМ от 1 до предела, иначе дальняя линия теряла бы ближние
 // места целиком. Улетевшее за край чашки семя пропадает — цена дальнего разлёта.
-function launchSeed(body, cg, lineage, provision, kind) {
+function launchSeed(body, cg, lineage, provision, kind, al) {
   if (seeds.length >= SEED_MAX) return false;
   const c = body.cells[Math.floor(Math.random()*body.cells.length)];
   const x = c%COLS, y = (c/COLS)|0;
-  const R = 1 + Math.floor(cg.dispersal*(kind ? SPORE_RANGE : SEED_RANGE));
+  const R = 1 + Math.floor(cg.dispersal*(kind === 2 ? EGG_RANGE : kind ? SPORE_RANGE : SEED_RANGE));
   const d = 1 + Math.floor(Math.random()*R);
   const a = Math.random()*Math.PI*2;
   const nx = Math.round(x + Math.cos(a)*d), ny = Math.round(y + Math.sin(a)*d);
   if (nx<0||nx>=COLS||ny<0||ny>=ROWS) { stats.seedLost++; return true; }  // цена уплачена, зачаток потерян
-  seeds.push({ i: idx(nx,ny), g: cg, lineage, energy: provision, kind });
-  if (kind) stats.sporeMade++; else stats.seedMade++;
+  const p = { i: idx(nx,ny), g: cg, al, lineage, energy: provision, kind };
+  if (kind === 2) { p.age = 0; p.incub = EGG_INCUB + cg.seedProv*EGG_INCUB_PROV; stats.eggMade++; }
+  else if (kind) stats.sporeMade++; else stats.seedMade++;
+  seeds.push(p);
   return true;
 }
 
@@ -792,7 +903,7 @@ function step() {
 
     // Кандидаты берём из предпосчитанного кольца: без тригонометрии, со случайной
     // точкой входа (чтобы не было направленной предвзятости) и с ранним выходом.
-    function placeChild(cTplArr, cg, childEnergy) {
+    function placeChild(cTplArr, cg, childEnergy, al) {
       let cw = 1, ch = 1;
       for (const o of cTplArr) { if (o[0]+1>cw) cw=o[0]+1; if (o[1]+1>ch) ch=o[1]+1; }
       const gap = Math.min(RING_MAX, pReach + Math.ceil((cw>ch?cw:ch)/2) + 1);
@@ -807,7 +918,7 @@ function step() {
         if (nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
         if (state[idx(nx,ny)] !== 0) continue;
         tried++;
-        const child = tryPlaceBody(cg, body.lineage, nx, ny, childEnergy);
+        const child = tryPlaceBody(cg, body.lineage, nx, ny, childEnergy, al);
         if (child) return child;
       }
       return null;
@@ -847,7 +958,8 @@ function step() {
     const wanted = g.broodSize;
     let madeAny = false;
     for (let k=0;k<wanted;k++) {
-      const cg = mutateGenome(mate ? recombine(g, mate.g) : g, body.guild==='pred');
+      const kid = childGenome(body, mate, body.guild==='pred');
+      const cg = kid.g;
       // крупный потомок стоит родителю пропорционально телу, которое ему предстоит
       // построить — иначе он стартует с крохами энергии и гибнет, не достроившись
       const cTplArr = templateOf(cg.shapeType, cg.shapeA, cg.shapeB);
@@ -856,19 +968,24 @@ function step() {
       // ── СЕМЯ вместо подсадки вплотную: только у фототрофа и только при половом
       // размножении. Провизия и дальность заявлены генами и оплачены сразу; место
       // при этом НЕ ищется — в том и смысл, что расселение не упирается в тесноту.
-      if (SEEDS_ON && mate && (body.guild === 'photo' || (SPORESEX_ON && body.guild === 'sapro'))) {
+      const isEgg = EGGS_ON && (body.guild === 'herb' || body.guild === 'pred');
+      if (SEEDS_ON && mate && (body.guild === 'photo' || (SPORESEX_ON && body.guild === 'sapro') || isEgg)) {
         const isSpore = body.guild === 'sapro' ? 1 : 0;
-        const prov = childCost * (isSpore ? (0.10 + cg.seedProv*SPORE_PROV) : (0.35 + cg.seedProv*0.8));
-        const seedCost = prov + childCost*(isSpore
-          ? (SPORE_OVERHEAD + cg.dispersal*SPORE_FLIGHT)
+        const kind = isEgg ? 2 : isSpore;
+        const prov = childCost * (kind === 2 ? (0.50 + cg.seedProv*EGG_PROV)
+                                : isSpore ? (0.10 + cg.seedProv*SPORE_PROV)
+                                : (0.35 + cg.seedProv*0.8));
+        const seedCost = prov + childCost*(kind === 2
+          ? (EGG_OVERHEAD + cg.dispersal*EGG_FLIGHT)
+          : isSpore ? (SPORE_OVERHEAD + cg.dispersal*SPORE_FLIGHT)
           : (SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT));
         if (body.energy < seedCost*0.5 + g.thresh*0.25 || mate.energy < seedCost*0.5) break;
-        if (!launchSeed(body, cg, body.lineage, prov, isSpore)) break;
+        if (!launchSeed(body, cg, body.lineage, prov, kind, kid.al)) break;
         body.energy -= seedCost*0.5; mate.energy -= seedCost*0.5; stats.sexBirths++;
         madeAny = true;
         continue;
       }
-      const child = placeChild(cTplArr, cg, Math.max(childCost*0.55, cg.__endow||0));
+      const child = placeChild(cTplArr, cg, Math.max(childCost*0.55, cg.__endow||0), kid.al);
       if (!child) { stats.noSpot++; body.cooldown = Math.max(6, g.cycleHours*0.3); break; }
       // цена делится между родителями — это и есть двукратная цена пола
       if (mate) { body.energy -= childCost*0.5; mate.energy -= childCost*0.5; stats.sexBirths++; }
@@ -935,7 +1052,10 @@ function reset(colonies=24, seed=null) {
   while (placed<colonies && guard<colonies*60) {
     guard++;
     const x = Math.floor(Math.random()*COLS), y = Math.floor(Math.random()*ROWS);
-    if (state[idx(x,y)]===0 && tryPlaceBody(founderGenome(), nextLineageId++, x, y, 9+Math.random()*4)) placed++;
+    if (state[idx(x,y)]===0) {
+      const [fg, fal] = founderDiploid();
+      if (tryPlaceBody(fg, nextLineageId++, x, y, 9+Math.random()*4, fal)) placed++;
+    }
   }
 }
 
@@ -961,8 +1081,25 @@ function snapshot() {
   let doneCnt=0; for (const b of bodies.values()) if (b.cells.length>=b.foot.length) doneCnt++;
   const kMean = keys.length ? keys.reduce((a,b)=>a+b,0)/keys.length : 0;
   const kSd = keys.length ? Math.sqrt(keys.reduce((a,b)=>a+(b-kMean)*(b-kMean),0)/keys.length) : 0;
+  let eggN=0, sporeN=0, seedN=0;
+  for (const p of seeds) { if (p.kind===2) eggN++; else if (p.kind) sporeN++; else seedN++; }
   let dspSum=0, prvSum=0; for (const b of bodies.values()) { dspSum+=b.g.dispersal; prvSum+=b.g.seedProv; }
-  return { hours, org: bodies.size, cells, corpses, sexN, seeds: seeds.length,
+  // Гетерозиготность: средняя разница аллелей, нормированная на диапазон гена.
+  // Считается отдельно для половых и клональных линий — в этом вся суть: клон
+  // свою гетерозиготность хранит, но никогда не перемешивает.
+  const QGEN = GENES.filter(k => !DOMINANT_ONLY.has(k));
+  let hetS=0, nS=0, hetA=0, nA=0;
+  let dipN = 0;
+  for (const b of bodies.values()) {
+    if (b.al.A === b.al.B) continue;
+    dipN++;
+    let h = 0;
+    for (const k of QGEN) { const [lo,hi] = RANGE[k]; h += Math.abs(b.al.A[k]-b.al.B[k])/(hi-lo); }
+    h /= QGEN.length;
+    if (b.g.sexual >= 0.5) { hetS += h; nS++; } else { hetA += h; nA++; }
+  }
+  return { hours, org: bodies.size, cells, corpses, sexN, seeds: seeds.length, seedN, sporeN, eggN,
+           hetSex: nS? +(hetS/nS).toFixed(4):0, hetAsex: nA? +(hetA/nA).toFixed(4):0, dipN,
            dispAvg: bodies.size? +(dspSum/bodies.size).toFixed(3):0, provAvg: bodies.size? +(prvSum/bodies.size).toFixed(3):0,
            infected, immAvg: bodies.size? +(immSum/bodies.size).toFixed(3):0, keySd: +kSd.toFixed(3), sexAvg: bodies.size? +(sexSum/bodies.size).toFixed(3):0,
            lifeSex: nSex? Math.round(lifeSex/nSex):0, lifeAsex: nAsex? Math.round(lifeAsex/nAsex):0, ...gc, multi, diff, maxSize, done: doneCnt,
