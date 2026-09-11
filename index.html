@@ -218,9 +218,9 @@
       <div class="stat"><span class="k">Вымерло линий</span><span class="v" id="sExtinct">0</span></div>
       <div class="stat"><span class="k">Схваток / выпасов</span><span class="v" id="sFights">0</span></div>
       <div class="stat"><span class="k">Перемещений</span><span class="v" id="sMoves">0</span></div>
-      <div class="stat"><span class="k">Прорастаний спор</span><span class="v" id="sSpores">0</span></div>
-      <div class="stat"><span class="k">Семян в почве</span><span class="v" id="sSeeds">0</span></div>
-      <div class="stat"><span class="k">Всходов</span><span class="v" id="sSeedGerm">0</span></div>
+      <div class="stat"><span class="k">Прорастаний конидий</span><span class="v" id="sSpores">0</span></div>
+      <div class="stat"><span class="k">Зачатков в почве</span><span class="v" id="sSeeds">0</span></div>
+      <div class="stat"><span class="k">Всходов из зачатков</span><span class="v" id="sSeedGerm">0</span></div>
       <div class="stat"><span class="k">Многоклеточных</span><span class="v" id="sBodies">0</span></div>
       <div class="stat"><span class="k">Крупнейшее тело</span><span class="v" id="sMaxBody">0</span></div>
       <div class="stat"><span class="k">Дифференцировано</span><span class="v" id="sDiff">0</span></div>
@@ -285,7 +285,7 @@
   let owner = new Int32Array(N);        // id тела, которому принадлежит клетка (0 = ничьё)
   let corpseFood = new Float32Array(N);
   let sporeDensity = new Float32Array(N);
-  let seeds = [];   // {i, g, lineage, energy} — банк семян в почве
+  let seeds = [];   // зачатки в почве: {i, g, lineage, energy, kind} — 0 семя, 1 спора
   let fertility = new Float32Array(N);
 
   let bodies = new Map();               // id -> организм (см. tryPlaceBody)
@@ -321,6 +321,13 @@
   const SEED_GERM_LIGHT = 0.25; // ниже этого света семя не всходит, а ждёт
   const SEED_DRIFT = 0.02;      // ветер сносит семя на клетку — свойство мира, не признак семени
   const SEED_MAX = 3000;
+  // ── СПОРЫ СТАЛИ ТАКИМИ ЖЕ ЗАЧАТКАМИ, как семена, но с ЗЕРКАЛЬНОЙ экономикой.
+  // Семя дорогое, ближнее и с запасом; спора дешёвая, дальняя и почти без запаса,
+  // зато покой у неё почти даровой — спящая спора обменом веществ не занята.
+  // Всходит спора не на свет, а на СУБСТРАТ: рядом должна лежать падаль.
+  const SPORE_RANGE = 30;        // споре решётка почти не тесна
+  const SPORE_UPKEEP = 0.0015;   // в восемь раз медленнее семени — отсюда долгий покой
+  const SPORE_PROV = 0.25, SPORE_OVERHEAD = 0.12, SPORE_FLIGHT = 0.10;
 
   // ─── Специализация клеток по положению в теле. Это НЕ ген: барьерная клетка —
   //     просто та, у которой есть ортогональный сосед не из своего тела. Так же
@@ -396,9 +403,9 @@
     ['shapeB',     'размер Б',        1,10,     'Высота прямоугольника и малая полуось овала. У квадрата и круга не используется.'],
     ['immunity',   'сила иммунитета', 0,1,      'Ускоряет выздоровление и снижает шанс заразиться. Стоит апкипа на каждую клетку — бесплатно сильным не бываешь.'],
     ['immuneKey',  'замок иммунитета',0,1,      'КАКОЙ генотип паразита распознаётся. Паразиту нужно, чтобы его «ключ» подошёл к замку. Ключ мутирует при передаче и догоняет распространённый замок, поэтому выгодно быть редким — это и есть гонка Красной Королевы. Замерено: при вирулентности 1.0 разброс замков держится на 0.295 при теоретическом максимуме 0.289.'],
-    ['dispersal',  'дальность семян', 0,1,     'Только у фототрофа и только при половом размножении. Задаёт предел разлёта семени (до 14 клеток при 1.0); реальная дальность разыгрывается от 1 до предела, иначе дальняя линия теряла бы ближние места целиком. Дальний бросок дороже, а улетевшее за край чашки семя пропадает.'],
-    ['seedProv',   'запас семени',    0,1,     'Сколько энергии вложено в семя. Это и стартовый капитал всхода, и срок покоя: семя дышит, запас тает, и когда он кончится — семя сгнило, не взойдя. Дорогое семя ждёт дольше и стартует сильнее, но за один помёт их выходит меньше.'],
-    ['sexual',     'половое размн.',  0,1,      'Склонность искать партнёра вместо клонирования. Потомок получает каждый ген от одного из двух родителей броском монеты. Партнёр обязан быть той же ниши и генетически близким — отдельного поля «вид» в коде нет, расхождение по пищевым генам само разводит линии. Не дождавшись партнёра за 48 часов, организм размножается клонально. У фототрофа половое размножение идёт СЕМЕНАМИ: потомок не подсаживается вплотную, а забрасывается на расстояние и может лежать в почве, пока не откроется место и свет.'],
+    ['dispersal',  'дальность зачатка',0,1,    'Работает у фототрофа (семена) и у сапротрофа (половые споры), и только при половом размножении. Задаёт предел разлёта: до 14 клеток у семени и до 30 у споры — спора мелкая, ей решётка почти не тесна. Реальная дальность разыгрывается от 1 до предела, иначе дальняя линия теряла бы ближние места целиком. Дальний бросок дороже, а улетевший за край чашки зачаток пропадает.'],
+    ['seedProv',   'запас зачатка',   0,1,     'Сколько энергии вложено в семя или спору. Это и стартовый капитал всхода, и срок покоя: зачаток дышит, запас тает, и когда он кончится — сгнил, не взойдя. У споры запас втрое меньше, зато и дыхание в восемь раз медленнее: она берёт не силой старта, а числом, дальностью и долгим ожиданием субстрата.'],
+    ['sexual',     'половое размн.',  0,1,      'Склонность искать партнёра вместо клонирования. Потомок получает каждый ген от одного из двух родителей броском монеты. Партнёр обязан быть той же ниши и генетически близким — отдельного поля «вид» в коде нет, расхождение по пищевым генам само разводит линии. Не дождавшись партнёра за 48 часов, организм размножается клонально. У фототрофа половое размножение идёт СЕМЕНАМИ, у сапротрофа — СПОРАМИ: потомок не подсаживается вплотную, а забрасывается на расстояние и лежит в почве, пока не откроется место. Семя ждёт света, спора — падали рядом.'],
   ];
   const GENES = GENE_INFO.map(g=>g[0]);
   // Какие гены реально работают у данной ниши. Ген photo у травоядного унаследован
@@ -763,6 +770,13 @@
           if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===0) empt.push([nx,ny]); }
         if(empt.length){
           const [gx,gy] = empt[Math.floor(Math.random()*empt.length)];
+          // Конидия (бесполая спора) — НЕ потомство конкретной грибницы, а
+          // повторный засев ниши основательским геномом. Это осознанное упрощение,
+          // а не недосмотр: вариант «конидия наследует геном ближайшего
+          // сапротрофа» написан и замерен — он не улучшил ни ген sapro, ни
+          // численность, а в одном прогоне обвалил мир вдвое (470 тел против
+          // 1410) и сжал число линий до 14. Настоящая наследственность у грибов
+          // идёт половыми спорами ниже. Замер остался в стенде: CINH=1.
           const g = founderGenome();
           g.photo = 0.02+Math.random()*0.06; g.sapro = 0.55+Math.random()*0.35;
           g.cycleHours = 48+Math.random()*100; g.lifespan = 1500+Math.random()*2500;
@@ -780,11 +794,21 @@
     let w = 0;
     for(let k=0;k<seeds.length;k++){
       const sd = seeds[k];
-      sd.energy -= SEED_UPKEEP;
-      if(sd.energy <= 0.05){ seedRotCount++; continue; }
+      sd.energy -= sd.kind ? SPORE_UPKEEP : SEED_UPKEEP;
+      if(sd.energy <= 0.02){ if(sd.kind) sporeRotCount++; else seedRotCount++; continue; }
       const x = sd.i%COLS, y = (sd.i/COLS)|0;
-      if(state[sd.i] === 0 && params.light*dayFactor*fertility[sd.i] >= SEED_GERM_LIGHT){
-        if(tryPlaceBody(sd.g, sd.lineage, x, y, sd.energy)){ seedGermCount++; continue; }
+      // Семя ждёт СВЕТА, спора ждёт СУБСТРАТА — разница ниш, перенесённая на
+      // стадию покоя: фототрофу нужно куда встать под солнцем, грибу — на чём расти.
+      let ready = false;
+      if(state[sd.i] === 0){
+        if(sd.kind){
+          for(const [dx,dy] of noff){ const nx=x+dx, ny=y+dy;
+            if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===2){ ready = true; break; } }
+        } else ready = params.light*dayFactor*fertility[sd.i] >= SEED_GERM_LIGHT;
+      }
+      if(ready && tryPlaceBody(sd.g, sd.lineage, x, y, sd.energy)){
+        if(sd.kind) sporeSexGermCount++; else seedGermCount++;
+        continue;
       }
       // ветер сносит семя: своего движения у семени нет, иначе оно дублировало бы
       // moveSpeed и стало бы просто зверем, а не покоящейся стадией
@@ -799,17 +823,17 @@
 
   // Точка приземления берётся от случайной клетки родителя; дальность — из гена,
   // но РОЗЫГРЫШЕМ от 1 до предела. Улетевшее за край чашки семя пропадает.
-  function launchSeed(body, cg, lineage, provision){
+  function launchSeed(body, cg, lineage, provision, kind){
     if(seeds.length >= SEED_MAX) return false;
     const c = body.cells[Math.floor(Math.random()*body.cells.length)];
     const x = c%COLS, y = (c/COLS)|0;
-    const R = 1 + Math.floor(cg.dispersal*SEED_RANGE);
+    const R = 1 + Math.floor(cg.dispersal*(kind ? SPORE_RANGE : SEED_RANGE));
     const d = 1 + Math.floor(Math.random()*R);
     const a = Math.random()*Math.PI*2;
     const nx = Math.round(x + Math.cos(a)*d), ny = Math.round(y + Math.sin(a)*d);
-    if(nx<0||nx>=COLS||ny<0||ny>=ROWS){ seedLostCount++; return true; }   // цена уплачена, семя потеряно
-    seeds.push({ i: idx(nx,ny), g: cg, lineage, energy: provision });
-    seedMadeCount++;
+    if(nx<0||nx>=COLS||ny<0||ny>=ROWS){ seedLostCount++; return true; }   // цена уплачена, зачаток потерян
+    seeds.push({ i: idx(nx,ny), g: cg, lineage, energy: provision, kind });
+    if(kind) sporeSexCount++; else seedMadeCount++;
     return true;
   }
 
@@ -1113,11 +1137,14 @@
         // размножении. Провизия и дальность заявлены генами и оплачены сразу, а
         // место при этом НЕ ищется — в том и смысл, что расселение не упирается
         // в тесноту вокруг родителя.
-        if(mate && body.guild === 'photo'){
-          const prov = childCost * (0.35 + cg.seedProv*0.8);
-          const seedCost = prov + childCost*(SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT);
+        if(mate && (body.guild === 'photo' || body.guild === 'sapro')){
+          const isSpore = body.guild === 'sapro' ? 1 : 0;
+          const prov = childCost * (isSpore ? (0.10 + cg.seedProv*SPORE_PROV) : (0.35 + cg.seedProv*0.8));
+          const seedCost = prov + childCost*(isSpore
+            ? (SPORE_OVERHEAD + cg.dispersal*SPORE_FLIGHT)
+            : (SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT));
           if(body.energy < seedCost*0.5 + g.thresh*0.25 || mate.energy < seedCost*0.5) break;
-          if(!launchSeed(body, cg, body.lineage, prov)) break;
+          if(!launchSeed(body, cg, body.lineage, prov, isSpore)) break;
           body.energy -= seedCost*0.5; mate.energy -= seedCost*0.5; sexBirths++;
           madeAny = true;
           continue;
@@ -1228,6 +1255,7 @@
     knownLineages = new Set(); lineageHueJitter = {};
     extinctCount = 0; actionCount = 0; moveCount = 0; sporeGermCount = 0; sexBirths = 0; infectCount = 0;
     seedMadeCount = 0; seedGermCount = 0; seedRotCount = 0; seedLostCount = 0; seeds.length = 0;
+    sporeSexCount = 0; sporeSexGermCount = 0; sporeRotCount = 0;
     flashes = []; allExtinctNotified = false; hours = 0; guildsEverSeen = new Set(['photo']);
     const initColonies = parseInt(document.getElementById('initColonies').value,10) || 24;
     let placed=0, guard=0;
@@ -1294,8 +1322,10 @@
     for(let k=0;k<seeds.length;k++){
       const sd = seeds[k]; const x = sd.i%COLS, y = (sd.i/COLS)|0;
       if(state[sd.i] !== 0) continue;
-      ctx.fillStyle = `rgba(74,222,128,${clamp(0.25+sd.energy*0.09, 0.25, 0.8).toFixed(2)})`;
-      ctx.fillRect(x*CELL+2, y*CELL+2, 3, 3);
+      ctx.fillStyle = sd.kind
+        ? `rgba(176,136,249,${clamp(0.3+sd.energy*0.3, 0.3, 0.8).toFixed(2)})`   // спора — цвет сапротрофа
+        : `rgba(74,222,128,${clamp(0.25+sd.energy*0.09, 0.25, 0.8).toFixed(2)})`; // семя — цвет фототрофа
+      ctx.fillRect(x*CELL+2, y*CELL+2, sd.kind?2:3, sd.kind?2:3);
     }
     for(const body of bodies.values()){
       const g = body.g;
@@ -1380,9 +1410,11 @@
     set('sPop', pop); set('sCorpse', corpses); set('sLineages', knownLineages.size);
     set('sExtinct', extinctCount); set('sFights', actionCount); set('sMoves', moveCount);
     set('sSpores', sporeGermCount);
-    set('sSeeds', seeds.length);
-    // всходы против сгнивших: без второго числа банк семян выглядит бесплатным
-    set('sSeedGerm', seedGermCount + (seedRotCount ? ` (сгнило ${seedRotCount})` : '')); set('sBodies', multi); set('sMaxBody', maxBody);
+    let seedN = 0, sporeN = 0;
+    for(let k=0;k<seeds.length;k++){ if(seeds[k].kind) sporeN++; else seedN++; }
+    set('sSeeds', `${seedN} сем. · ${sporeN} спор`);
+    // всходы против сгнивших: без второго числа банк зачатков выглядит бесплатным
+    set('sSeedGerm', `${seedGermCount}/${seedRotCount} сем. · ${sporeSexGermCount}/${sporeRotCount} спор`); set('sBodies', multi); set('sMaxBody', maxBody);
     set('sDiff', diff);
     set('sSex', bodies.size ? `${sexN} (${Math.round(sexN/bodies.size*100)}%)` : '0');
     set('sSexB', sexBirths);

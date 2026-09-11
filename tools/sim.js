@@ -76,6 +76,21 @@ const SEED_UPKEEP = parseFloat(process.env.SUPK||'0.012');  // семя дыши
 const SEED_GERM_LIGHT = parseFloat(process.env.SGL||'0.25'); // ниже этого не всходит, ждёт
 const SEED_DRIFT = 0.02;      // ветер: семя сносит на клетку, само оно не ходит
 const SEED_MAX = parseInt(process.env.SMAX||'3000',10);
+// ── СПОРЫ СТАЛИ ТАКИМИ ЖЕ ЗАЧАТКАМИ, как семена, но с ЗЕРКАЛЬНОЙ экономикой.
+// Семя дорогое, ближнее и с запасом; спора дешёвая, дальняя и почти без запаса,
+// зато покой у неё почти даровой — спящая спора обменом веществ не занята.
+// Всходит спора не на свет, а на субстрат: рядом должна быть падаль.
+const SPORE_RANGE = parseInt(process.env.SPRANGE||'30',10);
+const SPORE_UPKEEP = parseFloat(process.env.SPUPK||'0.0015');
+const SPORE_PROV = 0.25, SPORE_OVERHEAD = 0.12, SPORE_FLIGHT = 0.10;
+// Старое поле плотности спор осталось отдельной, БЕСПОЛОЙ веткой: оно засевает
+// нишу основательским геномом с нуля. Флаг нужен, чтобы проверить, не оно ли
+// мешает сапротрофам эволюционировать — см. замеры.
+const CONIDIA_ON = process.env.CONIDIA !== '0';
+const SPORESEX_ON = process.env.SPORESEX !== '0';   // половые споры сапротрофа
+// Замеренный и НЕ принятый вариант: конидия как клон грибницы. По умолчанию
+// выключен — см. раздел про споры в CLAUDE.md. Включается CINH=1.
+const CONIDIA_INHERIT = process.env.CINH === '1';
 const SEEDS_ON = process.env.SEEDS !== '0';   // выключатель для контрольного прогона
 
 const SAT = 1.0;   // насколько час кормёжки должен окупать расходы, чтобы остаться на месте
@@ -108,7 +123,7 @@ const borderMark = new Uint8Array(N);   // переиспользуемый ма
 let borderBuf = new Int32Array(4096); // переиспользуемый буфер барьерных клеток
 
 let bodies = new Map();
-let seeds = [];   // {i, g, lineage, energy}
+let seeds = [];   // зачатки: {i, g, lineage, energy, kind} — 0 семя фототрофа, 1 спора сапротрофа
 let nextBodyId = 1, nextLineageId = 1;
 let hours = 0, phaseX = 0, phaseY = 0, dayFactor = 1;
 const order = [];   // переиспользуемый буфер обхода тел
@@ -116,6 +131,7 @@ let params = { mutation: 0.12, decomp: 0.3, light: 0.62, predation: true, dayNig
 function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0,
   dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0, parInfect:0, parCleared:0, parSeed:0, parHours:0,
   seedMade:0, seedGerm:0, seedRot:0, seedLost:0, seedWait:0,
+  sporeMade:0, sporeGerm:0, sporeRot:0, conidiaKin:0,
   bornBy:{photo:0,herb:0,pred:0,sapro:0}, diedBy:{photo:0,herb:0,pred:0,sapro:0},
   lifeBy:{photo:0,herb:0,pred:0,sapro:0}, fedBy:{photo:0,herb:0,pred:0,sapro:0} }; }
 let stats = freshStats();
@@ -413,6 +429,7 @@ function decayCorpses() {
 }
 
 function processSpores() {
+  if (!CONIDIA_ON) return;
   for (const b of bodies.values()) if (b.guild === 'sapro') {
     for (const i of b.cells) {
       sporeDensity[i] = Math.min(SPORE_CAP, sporeDensity[i] + SPORE_DEPOSIT);
@@ -431,10 +448,26 @@ function processSpores() {
         if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===0) empt.push([nx,ny]); }
       if (empt.length) {
         const [gx,gy] = empt[Math.floor(Math.random()*empt.length)];
-        const g = founderGenome();
-        g.photo = 0.02+Math.random()*0.06; g.sapro = 0.55+Math.random()*0.35;
-        g.cycleHours = 48+Math.random()*100; g.lifespan = 1500+Math.random()*2500;
-        if (tryPlaceBody(g, nextLineageId++, gx, gy, 5)) { sporeDensity[i]=0; stats.germ++; }
+        // КОНИДИЯ — бесполая спора, то есть КЛОН. Раньше она всходила
+        // основательским геномом: каждое прорастание заводило новую линию с
+        // нуля, и ниша сапротрофа переизобреталась заново вместо того, чтобы
+        // эволюционировать. Геном берётся у ближайшего живого сапротрофа —
+        // это и есть та грибница, которая сюда насыпала спор.
+        let src = null, lin = 0;
+        if (CONIDIA_INHERIT) {
+          const c = NB24.cnt[i], base = i*NB24.k;
+          for (let o=0;o<c;o++) { const ni = NB24.tab[base+o];
+            if (state[ni]===1 && cellGuild[ni]===G_SAPRO) { const b = bodies.get(owner[ni]); if (b) { src = b; break; } } }
+        }
+        let g;
+        if (src) { g = mutateGenome(src.g, false); lin = src.lineage; }
+        else {
+          g = founderGenome();
+          g.photo = 0.02+Math.random()*0.06; g.sapro = 0.55+Math.random()*0.35;
+          g.cycleHours = 48+Math.random()*100; g.lifespan = 1500+Math.random()*2500;
+          lin = nextLineageId++;
+        }
+        if (tryPlaceBody(g, lin, gx, gy, 5)) { sporeDensity[i]=0; stats.germ++; if (src) stats.conidiaKin++; }
       }
     }
   }
@@ -448,11 +481,21 @@ function processSeeds() {
   let w = 0;
   for (let k=0;k<seeds.length;k++) {
     const s = seeds[k];
-    s.energy -= SEED_UPKEEP;
-    if (s.energy <= 0.05) { stats.seedRot++; continue; }
+    s.energy -= s.kind ? SPORE_UPKEEP : SEED_UPKEEP;
+    if (s.energy <= 0.02) { if (s.kind) stats.sporeRot++; else stats.seedRot++; continue; }
     const x = s.i%COLS, y = (s.i/COLS)|0;
-    if (state[s.i] === 0 && vGrad[y]*dayFactor*fertility[s.i] >= SEED_GERM_LIGHT) {
-      if (tryPlaceBody(s.g, s.lineage, x, y, s.energy)) { stats.seedGerm++; continue; }
+    // Семя ждёт СВЕТА, спора ждёт СУБСТРАТА — это и есть разница ниш, перенесённая
+    // на стадию покоя: фототрофу нужно куда встать под солнцем, грибу — на чём расти.
+    let ready = false;
+    if (state[s.i] === 0) {
+      if (s.kind) {
+        for (const [dx,dy] of noff) { const nx=x+dx, ny=y+dy;
+          if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===2) { ready = true; break; } }
+      } else ready = vGrad[y]*dayFactor*fertility[s.i] >= SEED_GERM_LIGHT;
+    }
+    if (ready && tryPlaceBody(s.g, s.lineage, x, y, s.energy)) {
+      if (s.kind) stats.sporeGerm++; else stats.seedGerm++;
+      continue;
     }
     stats.seedWait++;
     // ветер сносит семя — это свойство мира, а не признак семени: своего движения
@@ -469,17 +512,17 @@ function processSeeds() {
 // Запуск семени: точка приземления берётся от случайной клетки родителя, дальность
 // — из гена, но РОЗЫГРЫШЕМ от 1 до предела, иначе дальняя линия теряла бы ближние
 // места целиком. Улетевшее за край чашки семя пропадает — цена дальнего разлёта.
-function launchSeed(body, cg, lineage, provision) {
+function launchSeed(body, cg, lineage, provision, kind) {
   if (seeds.length >= SEED_MAX) return false;
   const c = body.cells[Math.floor(Math.random()*body.cells.length)];
   const x = c%COLS, y = (c/COLS)|0;
-  const R = 1 + Math.floor(cg.dispersal*SEED_RANGE);
+  const R = 1 + Math.floor(cg.dispersal*(kind ? SPORE_RANGE : SEED_RANGE));
   const d = 1 + Math.floor(Math.random()*R);
   const a = Math.random()*Math.PI*2;
   const nx = Math.round(x + Math.cos(a)*d), ny = Math.round(y + Math.sin(a)*d);
-  if (nx<0||nx>=COLS||ny<0||ny>=ROWS) { stats.seedLost++; return true; }  // цена уплачена, семя потеряно
-  seeds.push({ i: idx(nx,ny), g: cg, lineage, energy: provision });
-  stats.seedMade++;
+  if (nx<0||nx>=COLS||ny<0||ny>=ROWS) { stats.seedLost++; return true; }  // цена уплачена, зачаток потерян
+  seeds.push({ i: idx(nx,ny), g: cg, lineage, energy: provision, kind });
+  if (kind) stats.sporeMade++; else stats.seedMade++;
   return true;
 }
 
@@ -813,11 +856,14 @@ function step() {
       // ── СЕМЯ вместо подсадки вплотную: только у фототрофа и только при половом
       // размножении. Провизия и дальность заявлены генами и оплачены сразу; место
       // при этом НЕ ищется — в том и смысл, что расселение не упирается в тесноту.
-      if (SEEDS_ON && mate && body.guild === 'photo') {
-        const prov = childCost * (0.35 + cg.seedProv*0.8);
-        const seedCost = prov + childCost*(SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT);
+      if (SEEDS_ON && mate && (body.guild === 'photo' || (SPORESEX_ON && body.guild === 'sapro'))) {
+        const isSpore = body.guild === 'sapro' ? 1 : 0;
+        const prov = childCost * (isSpore ? (0.10 + cg.seedProv*SPORE_PROV) : (0.35 + cg.seedProv*0.8));
+        const seedCost = prov + childCost*(isSpore
+          ? (SPORE_OVERHEAD + cg.dispersal*SPORE_FLIGHT)
+          : (SEED_OVERHEAD + cg.dispersal*SEED_FLIGHT));
         if (body.energy < seedCost*0.5 + g.thresh*0.25 || mate.energy < seedCost*0.5) break;
-        if (!launchSeed(body, cg, body.lineage, prov)) break;
+        if (!launchSeed(body, cg, body.lineage, prov, isSpore)) break;
         body.energy -= seedCost*0.5; mate.energy -= seedCost*0.5; stats.sexBirths++;
         madeAny = true;
         continue;
@@ -859,7 +905,20 @@ function step() {
   hours++;
 }
 
-function reset(colonies=24) {
+// ── ВОСПРОИЗВОДИМОСТЬ. До этого `reset(n)` принимал ЧИСЛО КОЛОНИЙ, а генератор
+// был обычный Math.random — два прогона «с тем же стартом» на деле были двумя
+// разными мирами, и сравнение А/Б держалось на удаче. Теперь стенд подменяет
+// Math.random детерминированным mulberry32 на время прогона: одинаковый seed
+// даёт побитово одинаковый мир до первой точки, где сравниваемые правки
+// расходятся (метод общих случайных чисел). В браузере ничего не меняется.
+function mulberry32(a){ return function(){
+  a |= 0; a = a + 0x6D2B79F5 | 0;
+  let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+  return ((t ^ t >>> 14) >>> 0) / 4294967296;
+}; }
+function reset(colonies=24, seed=null) {
+  if (seed !== null) Math.random = mulberry32(seed);
   state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
   seeds.length = 0;
   bodies.clear(); nextBodyId=1; nextLineageId=1; hours=0;
