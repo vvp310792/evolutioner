@@ -55,7 +55,13 @@ const SOMA = parseFloat(process.env.SOMA || '0.000008');
 // маловероятно. Ключ мутирует при передаче и потому ДОГОНЯЕТ распространённый
 // замок — отсюда отбор, зависящий от частоты: выгодно быть редким. Это
 // единственный механизм, который ПОДДЕРЖИВАЕТ разброс генов, а не схлопывает его.
-const PAR_VIR  = parseFloat(process.env.PVIR  || '1.0');   // общий множитель среды, не признак штамма
+// Общий множитель среды (ползунок «давление паразитов» в браузере). ЖИВЁТ В
+// `params`, а не константой: в браузере это ручка интерфейса, и стенд обязан
+// звать её так же. Пока он держал её отдельной env-константой, калибровка
+// выставляла `params.parasites`, который никто не читал, — и 1920 прогонов
+// прошли с одним и тем же значением, а таблица по оси паразитов совпала до
+// цифры (одинаковый seed + не влияющий параметр = побитово тот же мир).
+const PAR_VIR_INIT = parseFloat(process.env.PVIR || '1.0');
 // ── ВИРУЛЕНТНОСТЬ ТЕПЕРЬ ПРИЗНАК ШТАММА и эволюционирует наравне с ключом.
 // Компромисс — классический trade-off: свирепый штамм заразнее (заразность
 // растёт как VIR_INF_LO + vir), но быстрее убивает хозяина и тем обрывает себе
@@ -202,7 +208,8 @@ let seeds = [];   // зачатки: {i, g, lineage, energy, kind} — 0 сем�
 let nextBodyId = 1, nextLineageId = 1;
 let hours = 0, phaseX = 0, phaseY = 0, dayFactor = 1;
 const order = [];   // переиспользуемый буфер обхода тел
-let params = { mutation: 0.12, decomp: 0.3, light: 0.62, predation: true, dayNight: true, sexReprod: true };
+let params = { mutation: 0.12, decomp: 0.3, light: 0.62, parasites: PAR_VIR_INIT,
+               predation: true, dayNight: true, sexReprod: true };
 function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0,
   dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0, parInfect:0, parCleared:0, parSeed:0, parHours:0,
   seedMade:0, seedGerm:0, seedRot:0, seedLost:0, seedWait:0,
@@ -850,7 +857,7 @@ function step() {
     // ---- доход ----
     if (body.par) {
       body.par.load = Math.min(1, body.par.load + 0.03);
-      body.energy -= body.par.load * body.par.vir * PAR_VIR * size * PAR_DMG;   // крупное тело — крупная мишень
+      body.energy -= body.par.load * body.par.vir * params.parasites * size * PAR_DMG;   // крупное тело — крупная мишень
       stats.parHours++;
       // Базовое выздоровление обязательно: при чистом `иммунитет*0.02` и стартовом
       // иммунитете 0.08 срок болезни выходил 625 часов, то есть пожизненно, и мир
