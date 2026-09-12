@@ -111,6 +111,7 @@
   .insp-empty{color:#8b9ab5;line-height:1.5}
   .insp-head{font-weight:700;font-size:14px;margin-bottom:2px}
   .insp-sub{color:#9fb0cc;margin-bottom:8px;line-height:1.5}
+  ul.mods{margin:0 0 8px 18px;padding:0;color:#c9d4e6;font-size:12px;line-height:1.5}
   table.genes,table.generef{width:100%;border-collapse:collapse;margin-top:6px}
   table.genes th,table.generef th{text-align:left;font-weight:600;padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;color:#dbe6f7}
   table.genes td,table.generef td{padding:3px 8px 3px 0;vertical-align:top}
@@ -257,6 +258,7 @@
       <div class="stat"><span class="k">Крупнейшее тело</span><span class="v" id="sMaxBody">0</span></div>
       <div class="stat"><span class="k">Дифференцировано</span><span class="v" id="sDiff">0</span></div>
       <div class="stat"><span class="k">Половых линий</span><span class="v" id="sSex">0</span></div>
+      <div class="stat"><span class="k">Свободных генов</span><span class="v" id="sMods">0</span></div>
       <div class="stat"><span class="k">Заражено</span><span class="v" id="sInf">0</span></div>
       <div class="stat"><span class="k">Разброс замков</span><span class="v" id="sKey">0</span></div>
       <div class="stat"><span class="k">Рождений от пола</span><span class="v" id="sSexB">0</span></div>
@@ -297,6 +299,7 @@
   <div class="legend">
     <b>Полный геном — 18 наследуемых генов.</b> Все до одного дрейфуют у потомка, и любой может быть целиком переброшен крупной мутацией. Ниша — не ген, а следствие: наибольший из первых четырёх.
     <table class="generef" id="geneRef"></table>
+    <p><b>Плюс свободные гены — их число не задано.</b> У основателя их ноль. Они возникают de novo и дупликацией (копия может сменить мишень — неофункционализация), каждый сдвигает один–три признака из таблицы выше на свою случайную величину и с своим знаком, наследуется по Менделю и стоит содержания. Что из этого остаётся — решает только отбор: в панели показано среднее число на тело и самая частая мишень, в инспекторе — полный список у организма.</p>
   </div>
 
 </div>
@@ -510,6 +513,51 @@
                   photo:0.25, herb:0.25, sapro:0.25, cycleHours:20, moveSpeed:0.3, lifespan:150, sexual:0.25, immunity:0.25, immuneKey:0.15,
                   dispersal:0.25, seedProv:0.25, dioecy:0.25, dormancy:0.25, myco:0.25 };
   const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
+
+  // ── СВОБОДНЫЕ ГЕНЫ. Все гены выше заданы заранее: у каждого фиксированный
+  // смысл, и «новизна» сводилась к сдвигу числа. В живой эволюции гены ВОЗНИКАЮТ —
+  // дупликацией с расхождением копий (Оно, 1970) и de novo — и функция их не
+  // предписана: новый ген действует на то, на что попал, нередко на несколько
+  // признаков сразу (плейотропия), а отбор решает, остаться ли ему. Здесь это
+  // локус-модификатор {id, мишени, веса}. У основателя их НОЛЬ — как ниши, пол и
+  // грибоядность, они обязаны возникнуть. Живут в каждом наборе аллелей отдельно,
+  // наследуются по Менделю (локус есть в обоих наборах — передаётся всегда, в
+  // одном — с вероятностью ½), выражаются аддитивно поверх базового гена (½ веса
+  // за копию: гомозигота даёт полный эффект) и стоят содержания — иначе геном
+  // раздувался бы мусором без предела. Честная оговорка: «случайный» ген может
+  // делать лишь то, что модель вообще умеет выражать. Открытым становится не
+  // набор функций, а ОТОБРАЖЕНИЕ генотипа в фенотип: какой признак, каким знаком,
+  // сколько признаков и сколько генов — предмет отбора, а не решение автора.
+  // Те же константы, что в tools/sim.js — разойтись им нельзя.
+  const MOD_SCALE = 0.25, MOD_NEW = 0.25, MOD_DUP = 0.15, MOD_DEL = 0.10, MOD_DRIFT = 0.15, MOD_RETARGET = 0.30;
+  const MOD_UPKEEP = 0.003;   // содержание одного гена на клетку в час (metab ~0.3)
+  const MOD_TARGETS = GENES.filter(k => k !== 'shapeType' && k !== 'immuneKey');   // категории не сдвигаются
+  let nextModId = 1;
+  function newMod(){
+    const r = Math.random(), n = r < 0.6 ? 1 : r < 0.9 ? 2 : 3;   // плейотропия: один признак чаще всего
+    const t = [], w = [];
+    while(t.length < n){ const k = MOD_TARGETS[Math.floor(Math.random()*MOD_TARGETS.length)]; if(!t.includes(k)){ t.push(k); w.push(Math.random()*2-1); } }
+    return { id: nextModId++, t, w };
+  }
+  const copyMod = m => ({ id: m.id, t: m.t.slice(), w: m.w.slice() });
+  function mutateMods(src, m){
+    const out = [];
+    for(const q of (src || [])){
+      if(Math.random() < m*MOD_DEL) continue;
+      const c = copyMod(q);
+      for(let i=0;i<c.w.length;i++) c.w[i] = clamp(c.w[i] + (Math.random()*2-1)*MOD_DRIFT*m, -1, 1);
+      out.push(c);
+    }
+    if(out.length && Math.random() < m*MOD_DUP){
+      const c = copyMod(out[Math.floor(Math.random()*out.length)]); c.id = nextModId++;
+      if(Math.random() < MOD_RETARGET){ const i = Math.floor(Math.random()*c.t.length);
+        let k; do { k = MOD_TARGETS[Math.floor(Math.random()*MOD_TARGETS.length)]; } while(c.t.includes(k)); c.t[i] = k; }
+      out.push(c);
+    }
+    if(Math.random() < m*MOD_NEW) out.push(newMod());
+    return out;
+  }
+  const modCount = al => (al.A.mods ? al.A.mods.length : 0) + (al.B.mods ? al.B.mods.length : 0);
   const SHAPE_NAMES = ['квадрат','прямоугольник','круг','овал'];
 
   // Границы зон взяты из перебора прогонами (по 2 запуска на точку, 20 000 часов),
@@ -728,6 +776,7 @@
     // и грибов. Разыгрывается при рождении 50/50 и больше не меняется.
     const dio = (guild0==='herb' || guild0==='pred') ? true : Math.random() < g.dioecy;
     const body = { id, g, al: al || { A: g, B: g }, lineage, guild: guild0, ox, oy, tpl, foot,
+                   nMods: modCount(al || { A: g, B: g }),
                    sex: dio ? (Math.random()<0.5 ? 'm' : 'f') : null,
                    cells:[i0], energy, age:0, cooldown:g.cycleHours };
     state[i0]=1; owner[i0]=id; cellGuild[i0]=GCODE[body.guild];
@@ -777,6 +826,7 @@
   function mutateAllele(pg, withMacro){
     const m = params.mutation, g = {};
     for(const k of GENES) g[k] = pg[k];
+    g.mods = mutateMods(pg.mods, m);
     for(const k of Object.keys(DRIFT)){
       const [lo,hi] = RANGE[k];
       g[k] = clamp(pg[k] + (Math.random()*2-1)*DRIFT[k]*m, lo, hi);
@@ -821,6 +871,9 @@
   function expressGenome(A, B){
     const g = {};
     for(const k of GENES) g[k] = DOMINANT_ONLY.has(k) ? A[k] : (A[k] + B[k]) * 0.5;
+    // свободные гены: ½ веса за копию, поверх базового значения, в долях диапазона
+    for(const set of [A.mods, B.mods]) if(set) for(const q of set)
+      for(let i=0;i<q.t.length;i++){ const k = q.t[i], [lo,hi] = RANGE[k]; g[k] = clamp(g[k] + 0.5*q.w[i]*MOD_SCALE*(hi-lo), lo, hi); }
     for(const k of DISCRETE) if(!DOMINANT_ONLY.has(k)) g[k] = Math.round(g[k]);
     g.maxN = Math.max(g.maxN, g.minN+1);
     return g;
@@ -828,6 +881,17 @@
   function gamete(al){
     const h = {};
     for(const k of GENES) h[k] = Math.random() < 0.5 ? al.A[k] : al.B[k];
+    // Свободные гены — по локусам: есть в обоих наборах — уходит в гамету всегда
+    // (одна из копий наугад), есть в одном — с вероятностью ½. Это независимое
+    // расщепление несцепленных локусов: пол перебирает КОМБИНАЦИИ генов.
+    h.mods = [];
+    const inB = new Map(); for(const q of (al.B.mods || [])) inB.set(q.id, q);
+    for(const q of (al.A.mods || [])){
+      const b = inB.get(q.id);
+      if(b){ h.mods.push(Math.random() < 0.5 ? q : b); inB.delete(q.id); }
+      else if(Math.random() < 0.5) h.mods.push(q);
+    }
+    for(const q of inB.values()) if(Math.random() < 0.5) h.mods.push(q);
     return h;
   }
   // Пакеты работают по ФЕНОТИПУ и записываются обратно в ОБА аллеля — но только
@@ -941,6 +1005,7 @@
       sexual: 0,                               // пол обязан возникнуть мутацией, как и ниши
       immunity: 0.05+Math.random()*0.05,
       immuneKey: Math.random(),                // «замок»: какой генотип паразита распознаётся
+      mods: [],                                // свободных генов у основателя нет — они обязаны возникнуть
     };
   }
   function spawnFounder(i, e){
@@ -1184,7 +1249,8 @@
       const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
                    + crowdSame*0.045 + (crowd-crowdSame)*0.006 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax
                    + size*g.lifespan*SOMA      // содержание долговечного тела
-                   + size*g.immunity*IMM_COST + size*g.myco*MYCO_COST; // иммунитет тоже надо содержать
+                   + size*g.immunity*IMM_COST + size*g.myco*MYCO_COST  // иммунитет тоже надо содержать
+                   + size*body.nMods*MOD_UPKEEP;                       // и свободные гены
       body.energy -= upkeep;
       if(body.energy <= 0){ killBody(body); continue; }           // гибнет ЦЕЛИКОМ: общий пул исчерпан
 
@@ -1567,7 +1633,7 @@
 
   function reset(){
     state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
-    bodies.clear(); nextBodyId = 1; nextLineageId = 1; selectedBody = null;
+    bodies.clear(); nextBodyId = 1; nextLineageId = 1; nextModId = 1; selectedBody = null;
 
     phaseX = Math.random()*10; phaseY = Math.random()*10;
     computeFertility();
@@ -1772,6 +1838,13 @@
     set('sDiff', diff);
     set('sSex', bodies.size ? `${sexN} (${Math.round(sexN/bodies.size*100)}%)` : '0');
     set('sSexB', sexBirths);
+    // свободные гены: среднее на тело и самая частая мишень — то, что отбор
+    // оставил из случайного; у основателей их ноль, так что любое число тут заработано
+    { let ms=0, ma=0; const tg={};
+      for(const b of bodies.values()){ const n=b.nMods||0; ms+=n; if(n) ma++;
+        for(const st of [b.al.A.mods, b.al.B.mods]) if(st) for(const q of st) for(const k of q.t) tg[k]=(tg[k]||0)+1; }
+      const top = Object.entries(tg).sort((a,b)=>b[1]-a[1])[0];
+      set('sMods', bodies.size ? `${(ms/bodies.size).toFixed(2)} на тело · есть у ${Math.round(100*ma/bodies.size)}%` + (top ? ` · чаще всего → ${top[0]}` : '') : '0'); }
     let dioN=0, maleN=0, virS=0, virN=0;
     for(const b of bodies.values()){
       if(b.sex){ dioN++; if(b.sex==='m') maleN++; }
@@ -1889,7 +1962,24 @@
           : ` · <b>диплоид</b>, гетерозиготность ${(heteroOf(b)*100).toFixed(1)}%`
             + (b.g.sexual >= 0.5 ? ' — половая линия, запас перемешивается каждое поколение'
                                  : ' — линия вернулась к клонированию: запас есть, но не перемешивается')) + `</div>`
-      + `<table class="genes">${rows}</table>`;
+      + `<table class="genes">${rows}</table>`
+      + modsHtml(b);
+  }
+  // Свободные гены организма: мишень, знак и сила, и в каком наборе лежит локус.
+  // Показываются отдельно от 26 базовых, потому что у них нет ни имени, ни
+  // предписанного смысла — только то, что они реально сдвигают.
+  function modsHtml(b){
+    const A = b.al.A.mods || [], B = b.al.B.mods || [];
+    if(!A.length && !B.length) return '<div class="insp-sub">Свободных генов нет — ни один ещё не возник или все утрачены.</div>';
+    const seen = new Map();
+    for(const [set,tag] of [[A,'A'],[B,'B']]) for(const q of set){
+      const e = seen.get(q.id) || { q, sets: [] }; e.sets.push(tag); seen.set(q.id, e); }
+    const label = k => (GENE_INFO.find(x=>x[0]===k)||[k,k])[1];
+    const items = [...seen.values()].map(({q,sets}) => {
+      const eff = q.t.map((k,i)=>`${label(k)} ${q.w[i]>=0?'+':'−'}${Math.abs(q.w[i]*MOD_SCALE*100*(sets.length/2)).toFixed(1)}%`).join(', ');
+      return `<li>№${q.id} · ${sets.length===2?'в обоих наборах':'в одном наборе ('+sets[0]+')'} · ${eff}</li>`;
+    }).join('');
+    return `<div class="insp-sub"><b>Свободных генов: ${seen.size}</b> (локусов; копий ${A.length+B.length}) — возникли de novo или дупликацией, у основателя их не было. Сдвиг указан в долях диапазона признака с учётом числа копий.</div><ul class="mods">${items}</ul>`;
   }
 
   let lastFrameTime = null, hourBudget = 0;
