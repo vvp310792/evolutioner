@@ -193,6 +193,59 @@ const DRIFT = { metab:0.5, effic:0.5, thresh:7, costFrac:0.28, aggression:0.25, 
                 dispersal:0.25, seedProv:0.25, dioecy:0.25, dormancy:0.25, myco:0.25 };
 const DISCRETE = ['minN','maxN','broodSize','shapeType','shapeA','shapeB'];
 
+// ── СВОБОДНЫЕ ГЕНЫ. Все 26 генов выше заданы заранее: у каждого фиксированный
+// смысл, и «новизна» в модели сводилась к сдвигу числа. В живой эволюции гены
+// ВОЗНИКАЮТ — дупликацией с последующим расхождением копий (Оно, 1970) и de novo —
+// и их функция не предписана: новый ген действует на то, на что попал, часто
+// на несколько признаков разом (плейотропия), и отбор решает, остаться ли ему.
+// Здесь это локус-модификатор: {id, t:[признак...], w:[вес...]}. У основателя
+// их НОЛЬ — как ниши, пол и грибоядность, они обязаны возникнуть. Живут в каждом
+// наборе аллелей отдельно, наследуются по Менделю (локус есть в обоих наборах —
+// передаётся всегда, в одном — с вероятностью ½), выражаются аддитивно поверх
+// базового гена (½ веса за копию, так что гомозигота даёт полный эффект).
+// Каждый стоит содержания — иначе геном раздувается мусором без предела.
+// Честная оговорка: «случайный» ген здесь может делать лишь то, что стенд
+// вообще умеет выражать. Открытым становится не набор функций, а ОТОБРАЖЕНИЕ
+// генотипа в фенотип: какой признак, каким знаком, сколько признаков разом и
+// сколько таких генов — всё это теперь предмет отбора, а не решение автора.
+const MODS_ON    = process.env.MODS !== '0';
+const MOD_SCALE  = 0.25;    // гомозиготный ген с весом 1 сдвигает признак на ¼ диапазона
+const MOD_NEW    = 0.25;    // × мутация: шанс de novo гена на набор за рождение
+const MOD_DUP    = 0.15;    // × мутация: шанс дупликации случайного имеющегося
+const MOD_DEL    = 0.10;    // × мутация: шанс потери, на каждый ген
+const MOD_DRIFT  = 0.15;    // × мутация: дрейф веса
+const MOD_RETARGET = 0.30;  // доля дупликаций, где копия меняет мишень (неофункционализация)
+const MOD_UPKEEP = 0.003;   // содержание одного гена на клетку в час (metab ~0.3)
+const MOD_TARGETS = GENES.filter(k => k !== 'shapeType' && k !== 'immuneKey');   // категории не сдвигаются
+let nextModId = 1;
+function newMod() {
+  const r = Math.random(), n = r < 0.6 ? 1 : r < 0.9 ? 2 : 3;   // плейотропия: 1 признак чаще всего
+  const t = [], w = [];
+  while (t.length < n) { const k = MOD_TARGETS[Math.floor(Math.random()*MOD_TARGETS.length)]; if (!t.includes(k)) { t.push(k); w.push(Math.random()*2-1); } }
+  return { id: nextModId++, t, w };
+}
+const copyMod = m => ({ id: m.id, t: m.t.slice(), w: m.w.slice() });
+function mutateMods(src, m) {
+  if (!MODS_ON) return [];
+  const out = [];
+  for (const q of (src || [])) {
+    if (Math.random() < m*MOD_DEL) continue;
+    const c = copyMod(q);
+    for (let i=0;i<c.w.length;i++) c.w[i] = clamp(c.w[i] + (Math.random()*2-1)*MOD_DRIFT*m, -1, 1);
+    out.push(c);
+  }
+  if (out.length && Math.random() < m*MOD_DUP) {
+    const c = copyMod(out[Math.floor(Math.random()*out.length)]); c.id = nextModId++;
+    if (Math.random() < MOD_RETARGET) { const i = Math.floor(Math.random()*c.t.length);
+      let k; do { k = MOD_TARGETS[Math.floor(Math.random()*MOD_TARGETS.length)]; } while (c.t.includes(k)); c.t[i] = k; }
+    out.push(c);
+  }
+  if (Math.random() < m*MOD_NEW) out.push(newMod());
+  return out;
+}
+// сколько генов носит тело — для платы за содержание
+const modCount = al => (al.A.mods ? al.A.mods.length : 0) + (al.B.mods ? al.B.mods.length : 0);
+
 let state = new Uint8Array(N);        // 0 пусто, 1 живая клетка, 2 труп
 let owner = new Int32Array(N);        // id тела, которому принадлежит клетка (0 = ничьё)
 let corpseFood = new Float32Array(N);
@@ -359,6 +412,7 @@ function tryPlaceBody(g, lineage, anchorX, anchorY, energy, al) {
   // грибов. Пол разыгрывается при рождении 50/50 и потом не меняется.
   const dio = (guild0 === 'herb' || guild0 === 'pred') ? true : Math.random() < g.dioecy;
   const body = { id, g, al: al || { A: g, B: g }, lineage, guild: guild0, ox, oy, tpl,
+                 nMods: modCount(al || { A: g, B: g }),
                  sex: dio ? (Math.random() < 0.5 ? 'm' : 'f') : null,
                  cells: [i0], foot, energy, age: 0, cooldown: g.cycleHours };
   state[i0] = 1; owner[i0] = id; cellGuild[i0] = GCODE[body.guild];
@@ -435,12 +489,14 @@ function moveBody(body, dx, dy) {
 function recombine(ga, gb) {
   const g = {};
   for (const k of GENES) g[k] = Math.random() < 0.5 ? ga[k] : gb[k];
+  g.mods = [];
   return g;
 }
 
 function mutateAllele(pg, withMacro) {
   const m = params.mutation, g = {};
   for (const k of GENES) g[k] = pg[k];
+  g.mods = mutateMods(pg.mods, m);
   for (const k of Object.keys(DRIFT)) {
     const [lo,hi] = RANGE[k];
     g[k] = clamp(pg[k] + (Math.random()*2-1)*DRIFT[k]*m, lo, hi);
@@ -484,6 +540,9 @@ const DOMINANT_ONLY = new Set(['shapeType','immuneKey']);
 function expressGenome(A, B) {
   const g = {};
   for (const k of GENES) g[k] = DOMINANT_ONLY.has(k) ? A[k] : (A[k] + B[k]) * 0.5;
+  // свободные гены: ½ веса за копию, поверх базового значения, в долях диапазона
+  for (const set of [A.mods, B.mods]) if (set) for (const q of set)
+    for (let i=0;i<q.t.length;i++) { const k = q.t[i], [lo,hi] = RANGE[k]; g[k] = clamp(g[k] + 0.5*q.w[i]*MOD_SCALE*(hi-lo), lo, hi); }
   for (const k of DISCRETE) if (!DOMINANT_ONLY.has(k)) g[k] = Math.round(g[k]);
   g.maxN = Math.max(g.maxN, g.minN + 1);
   return g;
@@ -491,6 +550,17 @@ function expressGenome(A, B) {
 function gamete(al) {
   const h = {};
   for (const k of GENES) h[k] = Math.random() < 0.5 ? al.A[k] : al.B[k];
+  // Свободные гены — по локусам: есть в обоих наборах — уходит в гамету всегда
+  // (одна из копий наугад), есть в одном — с вероятностью ½. Это и есть
+  // независимое расщепление несцепленных локусов: пол перебирает КОМБИНАЦИИ генов.
+  h.mods = [];
+  const inB = new Map(); for (const q of (al.B.mods || [])) inB.set(q.id, q);
+  for (const q of (al.A.mods || [])) {
+    const b = inB.get(q.id);
+    if (b) { h.mods.push(Math.random() < 0.5 ? q : b); inB.delete(q.id); }
+    else if (Math.random() < 0.5) h.mods.push(q);
+  }
+  for (const q of inB.values()) if (Math.random() < 0.5) h.mods.push(q);
   return h;
 }
 
@@ -620,6 +690,7 @@ function founderGenome() {
     dormancy: 0.05+Math.random()*0.15,   // глубина покоя зачатка
     myco: 0,     // грибоядность обязана возникнуть мутацией, как ниши и пол
     shapeType: 0, shapeA: 1, shapeB: 1,          // основатель одноклеточный
+    mods: [],    // свободных генов у основателя нет — они обязаны возникнуть
   };
 }
 
@@ -897,7 +968,8 @@ function step() {
     const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
                  + crowdSame*0.045 + (crowd-crowdSame)*0.006 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax
                  + size*g.lifespan*SOMA
-                 + size*g.immunity*IMM_COST + size*g.myco*MYCO_COST;   // содержание долговечного тела
+                 + size*g.immunity*IMM_COST + size*g.myco*MYCO_COST   // содержание долговечного тела
+                 + size*body.nMods*MOD_UPKEEP;                         // содержание свободных генов
     { const k = (body.foot.length>1 && size>=body.foot.length) ? acct.multi : (body.foot.length===1 ? acct.uni : null);
       if (k) { k.h++; k.cells += size; k.inc += income; k.upk += upkeep; } }
     { const q = gacct[body.guild]; q.h++; q.inc += income; q.upk += upkeep; }
@@ -1260,7 +1332,7 @@ function reset(colonies=24, seed=null) {
   if (seed !== null) Math.random = mulberry32(seed);
   state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
   seeds.length = 0; gametes.length = 0;
-  bodies.clear(); nextBodyId=1; nextLineageId=1; hours=0;
+  bodies.clear(); nextBodyId=1; nextLineageId=1; nextModId=1; hours=0;
   stats = freshStats();
   // Чашка — плоская плёнка, на которую смотрят СВЕРХУ, поэтому свет равномерен.
   // Раньше стояло `1 - (y/(ROWS-1))*0.68` — падение на 68% сверху вниз, то есть
@@ -1318,6 +1390,15 @@ function snapshot() {
   for (const b of bodies.values()) dormSum += b.g.dormancy;
   let dioN=0, maleN=0;
   for (const b of bodies.values()) { if (b.sex) { dioN++; if (b.sex === 'm') maleN++; } }
+  // свободные гены: сколько носит тело, у скольких есть хоть один, какие признаки
+  // они трогают и с каким знаком — это и есть след отбора на случайных генах
+  let modSum=0, modMax=0, modAny=0, modSexSum=0, modSexN=0, modAsexSum=0, modAsexN=0; const modTgt={}, modSign={};
+  for (const b of bodies.values()) {
+    const n = b.nMods || 0; modSum += n; if (n > modMax) modMax = n; if (n) modAny++;
+    if (b.g.sexual >= 0.5) { modSexSum += n; modSexN++; } else { modAsexSum += n; modAsexN++; }
+    for (const set of [b.al.A.mods, b.al.B.mods]) if (set) for (const q of set)
+      for (let i=0;i<q.t.length;i++) { modTgt[q.t[i]] = (modTgt[q.t[i]]||0)+1; modSign[q.t[i]] = (modSign[q.t[i]]||0)+q.w[i]; }
+  }
   let virSum=0, virN=0, virSq=0;
   for (const b of bodies.values()) if (b.par) { virSum += b.par.vir; virSq += b.par.vir*b.par.vir; virN++; }
   const virAvg = virN ? virSum/virN : 0;
@@ -1333,6 +1414,9 @@ function snapshot() {
     if (b.g.sexual >= 0.5) { hetS += h; nS++; } else { hetA += h; nA++; }
   }
   return { hours, org: bodies.size, cells, corpses, sexN, seeds: seeds.length, seedN, sporeN, eggN,
+           modAvg: bodies.size? +(modSum/bodies.size).toFixed(3):0, modMax, modShare: bodies.size? +(modAny/bodies.size).toFixed(3):0,
+           modSex: modSexN? +(modSexSum/modSexN).toFixed(3):0, modAsex: modAsexN? +(modAsexSum/modAsexN).toFixed(3):0,
+           modTgt, modSign,
            hetSex: nS? +(hetS/nS).toFixed(4):0, hetAsex: nA? +(hetA/nA).toFixed(4):0, dipN,
            mycoAvg: mycoN? +(mycoSum/mycoN).toFixed(3):0, mycoShare: mycoN? +(mycoHigh/mycoN).toFixed(3):0,
            dormAvg: bodies.size? +(dormSum/bodies.size).toFixed(3):0,

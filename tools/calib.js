@@ -40,4 +40,5 @@ console.log([
   mean(all.map(b => b.g.armor)).toFixed(3), mean(all.map(b => b.g.effic)).toFixed(3),
   popN ? Math.round(popSum / popN) : 0, popMin === 1e9 ? 0 : popMin,
   t.moves, t.eaten, t.born,
+  s.modAvg, s.modMax, s.modShare, s.modSex, s.modAsex,
 ].join(","));
