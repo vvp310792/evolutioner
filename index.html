@@ -165,6 +165,34 @@
   <button id="btnSeed">Подсадить ещё фототрофов</button>
 
   <div class="panel">
+    <h3>Режимы</h3>
+    <div class="scalenote scaleopt">Наборы настроек, отобранные калибровкой на 816 прогонах: каждый — точка решётки, где нужное поведение воспроизвелось минимум в двух репликах из трёх, а мир при этом не вымер. Выбор пресета перезапускает чашку с нуля — иначе прежний мир продолжал бы жить по старым правилам.</div>
+    <div class="field">
+      <label>Пресет</label>
+      <select id="preset">
+        <option value="">— выбрать —</option>
+        <optgroup label="Устойчивые миры">
+          <option value="default">По умолчанию</option>
+          <option value="lug">Богатый луг</option>
+          <option value="savanna">Саванна</option>
+          <option value="skudny">Скудный мир</option>
+          <option value="klon">Клональный мир</option>
+        </optgroup>
+        <optgroup label="Показательные механики">
+          <option value="multi">Мир многоклеточных</option>
+          <option value="sex">Победа пола</option>
+          <option value="queen">Гонка Красной Королевы</option>
+          <option value="myco">Грибоеды</option>
+          <option value="bank">Банк семян</option>
+          <option value="dioecy">Двудомность</option>
+          <option value="parpress">Давление паразитов</option>
+        </optgroup>
+      </select>
+      <div class="scalenote" id="notePreset">Свой набор настроек — двигай ползунки ниже.</div>
+    </div>
+  </div>
+
+  <div class="panel">
     <h3>Параметры</h3>
     <div class="scalenote scaleopt">Зелёная часть шкалы — измеренный оптимум, жёлтая — рабочая, но перекошенная область, красная — гибель. За оптимум выходить можно и нужно: именно так видно, чем он держится.</div>
     <div class="field">
@@ -1941,6 +1969,60 @@
     updateStats();   // чтобы инспектор сразу перерисовал ген как неработающий
   });
   document.getElementById('daynight').addEventListener('change', e=>{ params.dayNight = e.target.checked; });
+
+  // ── ПРЕСЕТЫ. Не выдуманы, а отобраны калибровкой: 816 прогонов по решётке из
+  // четырёх ползунков и трёх галочек, по три реплики на точку. В «устойчивые»
+  // попали точки, где НИ ОДНА реплика не вымерла и цепь осталась полной; в
+  // «показательные» — те, где нужное явление воспроизвелось минимум в двух
+  // репликах из трёх при живом мире. Числа в подписях — медианы по репликам.
+  const PRESETS = {
+    default:  { light:0.62, mut:0.12, decomp:0.30, par:1.0, pred:true, sex:true, dn:true,
+      note:'Штатная настройка. Полная цепь, умеренное всё. Отсюда стоит начинать.' },
+    lug:      { light:0.80, mut:0.12, decomp:0.15, par:1.0, pred:true, sex:true, dn:true,
+      note:'Самый населённый из устойчивых миров: около 2900 тел, полная цепь (2287 фототрофов, 320 травоядных, 58 хищников, 203 сапротрофа). Тела мелкие — тесно.' },
+    savanna:  { light:1.30, mut:0.12, decomp:0.30, par:1.0, pred:true, sex:true, dn:true,
+      note:'Света в избытке, и перевес смещается к травоядным: их 355 при 1407 фототрофах. Полная цепь выходила в 44% прогонов — это лучший показатель по всей решётке.' },
+    skudny:   { light:0.62, mut:0.30, decomp:0.60, par:1.0, pred:true, sex:true, dn:true,
+      note:'Мир тесный и небогатый (около 800 тел), зато самые крупные тела среди устойчивых: до 21 клетки. Скудость толкает к многоклеточности.' },
+    klon:     { light:1.00, mut:0.30, decomp:0.30, par:1.0, pred:true, sex:false, dn:true,
+      note:'Пол выключен, всё потомство клональное. Около 2000 тел — то есть без пола мир вполне живёт; разница проявляется в разнообразии, а не в численности.' },
+    multi:    { light:0.80, mut:0.60, decomp:0.60, par:1.0, pred:true, sex:true, dn:true,
+      note:'Многоклеточность в 100% реплик, тела до 19 клеток. Высокая мутация плюс быстрый оборот вещества: главный двигатель размера — именно мутация (70% миров с телами против 11% при мутации 0.04).' },
+    sex:      { light:0.55, mut:0.12, decomp:0.30, par:1.0, pred:true, sex:true, dn:true,
+      note:'Половые линии берут больше половины населения в двух репликах из трёх. Работает на БЕДНОМ свете — в богатых мирах выигрывает клонирование.' },
+    queen:    { light:0.45, mut:0.12, decomp:0.30, par:1.0, pred:false, sex:true, dn:false,
+      note:'Гонка Красной Королевы в 100% реплик: разброс замков иммунитета выше предела равномерного распределения. Хищники и смена дня отключены — чтобы на графике не мешало ничего, кроме коэволюции с паразитом.' },
+    myco:     { light:0.62, mut:0.12, decomp:0.60, par:1.0, pred:true, sex:true, dn:true,
+      note:'Грибоядность в 100% реплик. Быстрое разложение даёт много грибов, и звери переходят на них: доля микофагов выше 40%.' },
+    bank:     { light:0.62, mut:0.30, decomp:0.15, par:1.0, pred:false, sex:true, dn:true,
+      note:'Глубокий покой зачатков в 100% реплик, тела до 37 клеток — самые крупные во всей калибровке. Хищники выключены: без них давление на растения слабее и банк успевает накопиться.' },
+    dioecy:   { light:0.80, mut:0.12, decomp:0.15, par:1.0, pred:true, sex:true, dn:true,
+      note:'Двудомность у растений и грибов выше трети населения в 100% реплик, при этом мир самый крупный. Однодомность и двудомность сосуществуют, как в природе.' },
+    parpress: { light:0.80, mut:0.12, decomp:0.30, par:2.0, pred:true, sex:true, dn:true,
+      note:'Давление паразитов вдвое выше штатного. Замерено на 192 прогонах: чем дороже вред, тем НИЖЕ эволюционирует свирепость (0.59 против 1.13 при нулевом давлении) и тем меньше заражённость (39% против 61%).' },
+  };
+  document.getElementById('preset').addEventListener('change', e=>{
+    const p = PRESETS[e.target.value];
+    const note = document.getElementById('notePreset');
+    if(!p){ note.textContent = 'Свой набор настроек — двигай ползунки ниже.'; return; }
+    params.light = p.light; params.mutation = p.mut; params.decomp = p.decomp;
+    params.parasites = p.par; params.predation = p.pred; params.sexReprod = p.sex; params.dayNight = p.dn;
+    const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
+    set('light', Math.round(p.light*100)); set('mutation', Math.round(p.mut*100));
+    set('regen', Math.round(p.decomp*100)); set('parasites', Math.round(p.par*100));
+    document.getElementById('predation').checked = p.pred;
+    document.getElementById('sexrepro').checked = p.sex;
+    document.getElementById('daynight').checked = p.dn;
+    document.getElementById('lblLight').textContent = p.light.toFixed(2);
+    document.getElementById('lblMut').textContent = Math.round(p.mut*100)+'%';
+    document.getElementById('lblRegen').textContent = p.decomp.toFixed(2);
+    document.getElementById('lblPar').textContent = p.par.toFixed(2);
+    ['light','mutation','decomp','parasites'].forEach(paintScale);
+    note.textContent = p.note;
+    // Пресет перезапускает чашку: прежний мир уже сложился под старые правила,
+    // и менять их на ходу значит смотреть не на режим, а на его последствия.
+    reset();
+  });
 
   canvas.addEventListener('click', e=>{
     const rect = canvas.getBoundingClientRect();
