@@ -34,6 +34,13 @@ FLAGS = {
     'грибоядные':       lambda r: f(r, 'mycoShare') >= 0.40,
     'банк покоя':       lambda r: f(r, 'dorm') >= 0.40,
     'двудомность':      lambda r: f(r, 'dioecy') >= 0.35,
+    # Появились вместе со свободными генами и видовой структурой. Порог «богатого
+    # генома» взят не с потолка: медиана штатной точки на 12 000 ч — около 2, так
+    # что 4 это вдвое выше обычного. «Много родов» — компонент графа скрещиваний
+    # по 5 и более тел: одна такая компонента бывает всегда (это ниша), четыре
+    # значат, что гены перестали течь между группами ВНУТРИ ниш.
+    'богатый геном':    lambda r: 'mods' in r and f(r, 'mods') >= 4.0,
+    'много родов':      lambda r: 'compBig' in r and f(r, 'compBig') >= 4,
 }
 
 for r in rows:
@@ -92,7 +99,9 @@ def describe(box, g):
             f"пол {'да' if d['sex']=='1' else 'нет'} → тел {pop:.0f}, "
             f"ф/т/х/с {st.median([f(r,'photo') for r in g]):.0f}/{st.median([f(r,'herb') for r in g]):.0f}/"
             f"{st.median([f(r,'pred') for r in g]):.0f}/{st.median([f(r,'sapro') for r in g]):.0f}, "
-            f"max тело {st.median([f(r,'maxSize') for r in g]):.0f}")
+            f"max тело {st.median([f(r,'maxSize') for r in g]):.0f}"
+            + (f", генов {st.median([f(r,'mods') for r in g]):.1f}" if 'mods' in g[0] else "")
+            + (f", родов {st.median([f(r,'compBig') for r in g]):.0f}" if 'compBig' in g[0] else ""))
 for box, g in stable[:12]:
     print(f"- {describe(box, g)}")
 print(f"\nВсего устойчивых точек: {len(stable)}\n")
@@ -112,6 +121,32 @@ for fname, fn in FLAGS.items():
         print(f"- {describe(best[1], best[2])}\n")
     else:
         print(f"### {fname}\n\n- устойчивой точки не нашлось: явление либо редкое, либо только в гибнущих мирах\n")
+
+if 'mods' in rows[0]:
+    print("## Геном и видовая структура — то, чего в первой калибровке не было\n")
+    print("Свободных генов на тело и компонент графа скрещиваний (компонента — не вид,\n"
+          "а «род»: группа, внутри которой гены ещё текут; одна на нишу бывает всегда).\n")
+    for key, name in (('light','свет'), ('mut','мутация'), ('decomp','разложение'), ('par','паразиты')):
+        vals = sorted({r[key] for r in rows}, key=float)
+        print(f"| {name} | генов на тело | у скольких тел | самый нагруженный | родов ≥5 тел | крупнейший род |")
+        print("|" + "---|" * 6)
+        for v in vals:
+            alive = [r for r in rows if r[key] == v and f(r, 'extinct_h') == 0]
+            if not alive: continue
+            md = lambda k: st.median([f(r, k) for r in alive])
+            print(f"| {v} | {md('mods'):.2f} | {100*md('modShare'):.0f}% | {md('modMax'):.0f} | "
+                  f"{md('compBig'):.1f} | {md('compMax'):.0f} |")
+        print()
+    # На что чаще всего садятся свободные гены: если бы мишень была случайной,
+    # каждый признак выходил бы в лидеры примерно поровну. Перекос — след отбора.
+    tops = defaultdict(int)
+    for r in rows:
+        if f(r, 'extinct_h') == 0 and r.get('modTop', '-') not in ('-', ''): tops[r['modTop']] += 1
+    if tops:
+        tot = sum(tops.values())
+        print("Самая частая мишень свободных генов в прогоне (доля прогонов):\n")
+        print(", ".join(f"**{k}** {100*v/tot:.0f}%" for k, v in sorted(tops.items(), key=lambda x: -x[1])[:8]))
+        print()
 
 print("## Границы гибели\n")
 for key, name in (('light','свет'), ('decomp','разложение')):
