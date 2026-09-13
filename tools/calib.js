@@ -24,6 +24,29 @@ for (let h = 1; h <= HOURS; h++) {
 }
 const s = S.snapshot(), t = S.stats;
 const all = [...S.bodies.values()];
+// ── ВИДОВАЯ СТРУКТУРА. Компоненты графа скрещиваний по тому же правилу, каким
+// модель выбирает партнёра. Считается на ПОДВЫБОРКЕ до 300 тел: полный граф это
+// O(n²) на двух тысячах тел в каждом из тысячи прогонов, а ранг точки по числу
+// компонент от подвыборки не меняется. Компонента — не вид (совместимость
+// нетранзитивна, см. CLAUDE.md), это «род»: группа, внутри которой гены ещё текут.
+function components(list) {
+  const p = list.map((_, i) => i), find = x => { while (p[x] !== x) x = p[x] = p[p[x]]; return x; };
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++)
+    if (S.compatible(list[i], list[j])) { const a = find(i), b = find(j); if (a !== b) p[a] = b; }
+  const cnt = new Map();
+  for (let i = 0; i < list.length; i++) { const r = find(i); cnt.set(r, (cnt.get(r) || 0) + 1); }
+  return [...cnt.values()];
+}
+const SUB = 300;
+let sub = all;
+if (all.length > SUB) { sub = all.slice(); for (let i = sub.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; const q = sub[i]; sub[i] = sub[j]; sub[j] = q; } sub = sub.slice(0, SUB); }
+const comps = all.length ? components(sub) : [];
+const compBig = comps.filter(c => c >= 5).length;
+// плейотропия и самая частая мишень свободных генов — чем занят возникший геном
+let pleioSum = 0, pleioN = 0; const tgt = {};
+for (const b of all) for (const set of [b.al.A.mods, b.al.B.mods]) if (set) for (const q of set) {
+  pleioSum += q.t.length; pleioN++; for (const k of q.t) tgt[k] = (tgt[k] || 0) + 1; }
+const topTgt = Object.entries(tgt).sort((a, b) => b[1] - a[1])[0];
 const plants = all.filter(b => b.guild === "photo" || b.guild === "sapro");
 const diff = all.filter(b => b.cells.length >= 9).length;
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
@@ -41,4 +64,6 @@ console.log([
   popN ? Math.round(popSum / popN) : 0, popMin === 1e9 ? 0 : popMin,
   t.moves, t.eaten, t.born,
   s.modAvg, s.modMax, s.modShare, s.modSex, s.modAsex,
+  pleioN ? (pleioSum / pleioN).toFixed(2) : 0, topTgt ? topTgt[0] : "-",
+  comps.length, compBig, comps.length ? Math.max(...comps) : 0,
 ].join(","));
