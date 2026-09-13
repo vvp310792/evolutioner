@@ -72,4 +72,8 @@ console.log([
   s.modAvg, s.modMax, s.modShare, s.modSex, s.modAsex,
   pleioN ? (pleioSum / pleioN).toFixed(2) : 0, topTgt ? topTgt[0] : "-",
   comps.length, compBig, comps.length ? Math.max(...comps) : 0,
+  // Режим свободных генов ОБЯЗАН попасть в строку: у вымершего мира все прочие
+  // колонки нули, и по ним не отличить прогон с генами от прогона без них —
+  // ровно это сделало нечитаемым первый парный опыт про цену содержания.
+  process.env.MODS === "0" ? 0 : 1,
 ].join(","));
