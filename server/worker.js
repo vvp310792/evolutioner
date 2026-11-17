@@ -17,15 +17,20 @@ function checkpoint(){
   savedAt=at;lastSavedHour=world.model.api.hours;
 }
 if(!saved)checkpoint();
-let actual=0,measuredAt=performance.now(),measuredHour=world.model.api.hours;
+let actual=0,speedMeasurementReady=false,measuredAt=performance.now(),measuredHour=world.model.api.hours;
 let lastTick=performance.now(),budget=0,stopping=false,saveError=null;
+function resetSpeedMeasurement(){
+  // Остаток быстрого режима и его замер не должны переходить в медленный режим.
+  budget=0;lastTick=measuredAt=performance.now();measuredHour=world.model.api.hours;
+  actual=0;speedMeasurementReady=false;
+}
 function publish(){
   world.model.api.announceEvents();
   const frame=world.frame(),now=performance.now();
-  if(now-measuredAt>=2000){actual=(frame.hours-measuredHour)*1000/(now-measuredAt);measuredAt=now;measuredHour=frame.hours;}
+  if(now-measuredAt>=2000){actual=(frame.hours-measuredHour)*1000/(now-measuredAt);measuredAt=now;measuredHour=frame.hours;speedMeasurementReady=true;}
   history.push({hours:frame.hours,org:frame.org,cells:frame.cells,photo:frame.counts.photo,herb:frame.counts.herb,pred:frame.counts.pred,sapro:frame.counts.sapro});
   if(history.length>240)history.shift();
-  parentPort.postMessage({type:'frame',frame:{...frame,running,actualHoursPerSecond:running?actual:0,savedAt,lastSavedHour,saveError,
+  parentPort.postMessage({type:'frame',frame:{...frame,running,actualHoursPerSecond:running?actual:0,speedMeasurementReady,savedAt,lastSavedHour,saveError,
     history,serverTime:Date.now(),modelVersion:modelHash.slice(0,12)}});
 }
 function safeSave(){
@@ -58,9 +63,11 @@ parentPort.on('message',message=>{
       checkpoint();
       fs.copyFileSync(file,path.join(path.dirname(file),'before-reset-'+Date.now()+'.evo'));
     }
+    const previousSpeed=world.model.params.hoursPerMinute,previousRunning=running;
     world.apply(c);
     if(c.type==='running')running=c.value;
-    if(resets){budget=0;history=[];measuredHour=0;measuredAt=performance.now();actual=0;}
+    if(resets)history=[];
+    if(resets||previousSpeed!==world.model.params.hoursPerMinute||previousRunning!==running)resetSpeedMeasurement();
     checkpoint();publish();
     parentPort.postMessage({id,value:{ok:true,hours:world.model.api.hours}});
   }catch(error){

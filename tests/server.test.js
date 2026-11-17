@@ -122,6 +122,19 @@ test('HTTP: пароль, защита команд, сохранение и п�
   const restored=await(await request('/api/state')).json();assert.equal(restored.hours,s.hours);assert.equal(restored.grid,s.grid);assert.equal(restored.params.light,.91);assert.equal(restored.running,false);assert.deepEqual(restored.events,s.events);
   assert.equal((await request('/api/command',{type:'running',value:true})).status,200);
   await new Promise(r=>setTimeout(r,750));assert.ok((await(await request('/api/state')).json()).hours>s.hours);
+  assert.equal((await request('/api/command',{type:'params',values:{hoursPerMinute:600000}})).status,200);
+  let fast;
+  for(let i=0;i<60;i++){
+    fast=await(await request('/api/state')).json();if(fast.speedMeasurementReady)break;
+    await new Promise(r=>setTimeout(r,100));
+  }
+  assert.ok(fast.speedMeasurementReady);assert.ok(fast.actualHoursPerSecond>1);
+  assert.equal((await request('/api/command',{type:'params',values:{hoursPerMinute:60}})).status,200);
+  const changed=await(await request('/api/state')).json();assert.equal(changed.speedMeasurementReady,false);assert.equal(changed.actualHoursPerSecond,0);
+  await new Promise(r=>setTimeout(r,2700));
+  const slow=await(await request('/api/state')).json();assert.ok(slow.speedMeasurementReady);
+  assert.ok(slow.actualHoursPerSecond>.6&&slow.actualHoursPerSecond<1.4,slow.actualHoursPerSecond);
+  assert.ok(slow.hours-changed.hours>=2&&slow.hours-changed.hours<=3,slow.hours-changed.hours);
   assert.equal((await request('/api/command',{type:'reset',founders:12,seed:7})).status,200);
   assert.ok(fs.readdirSync(dir).some(n=>n.startsWith('before-reset-')));
   assert.equal((await request('/api/command',{type:'preset',id:'rich',founders:12,seed:7})).status,200);

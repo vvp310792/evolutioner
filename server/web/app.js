@@ -4,7 +4,7 @@ const names={photo:'свет',herb:'растительная пища',pred:'ж�
 const roles=['обычная','синтезирующая','пищеварительная','защитная'];
 const colors=['#52c57f','#dcc15d','#e77586','#b094e5'];
 const ctx=$('dish').getContext('2d'),chart=$('chart').getContext('2d');
-let frame=null,owners=null,selected=null,polling=false,drawCount=0,connectionError=false;
+let frame=null,owners=null,selected=null,polling=null,drawCount=0,connectionError=false;
 let catalog=null,catalogMode='',catalogLoading=false,pendingReset={type:'reset'};
 let speedDraft=null,speedTimer=null,speedSending=false;
 const speedFromSlider=position=>Math.max(1,Math.round(600000**(position/100)));
@@ -17,7 +17,7 @@ async function api(url,data){
 }
 async function command(data){
   $('error').textContent='';
-  try{await api('/api/command',data);await poll(true);return true;}
+  try{await api('/api/command',data);return await poll(true);}
   catch(error){$('error').textContent=error.message;return false;}
 }
 function bytes(base64){return Uint8Array.from(atob(base64),c=>c.charCodeAt(0));}
@@ -90,6 +90,7 @@ function update(s){
   }
   $('speedValue').textContent=number(speedDraft??s.params.hoursPerMinute)+' ч/мин';
   $('serverSpeed').textContent=number(s.params.hoursPerMinute)+' ч/мин';
+  updateSpeedStatus(s);
   if(!$('resetDialog').open){
     $('openDiet').checked=s.params.openDiet;$('programBodies').checked=s.params.programBodies;
     $('modelMode').value=!s.params.openDiet&&!s.params.programBodies&&s.params.packageStrength===1?'legacy':s.params.openDiet&&s.params.programBodies&&s.params.packageStrength===0?'open':'custom';
@@ -101,11 +102,31 @@ function update(s){
   $('ramp').textContent=s.params.assistanceRamp?'Идёт плавное снижение; осталось '+number(Math.max(0,s.params.assistanceRamp.duration-s.hours+s.params.assistanceRamp.start))+' часов мира.':'';
   $('version').textContent='Версия '+s.modelVersion+' · последний кадр '+new Date(s.serverTime).toLocaleTimeString('ru-RU');
 }
+function updateSpeedStatus(s){
+  const target=s.params.hoursPerMinute,actual=s.actualHoursPerSecond*60;
+  // В двухсекундном замере один целый шаг даёт до 30 ч/мин погрешности.
+  const tolerance=Math.max(target*.15,31);
+  $('speedActual').textContent=s.running&&(!s.speedMeasurementReady||speedDraft!==null)?'измеряем…':number(actual)+' ч/мин';
+  let status='following',message='Сервер выдерживает заданную скорость.';
+  if(!s.running){status='paused';message='Расчёт на паузе.';}
+  else if(speedDraft!==null){status='sending';message='Отправляем новое значение на сервер…';}
+  else if(!s.speedMeasurementReady){status='measuring';message='Измеряем скорость после изменения цели…';}
+  else if(target<60){status='slow';message='Один модельный час примерно каждые '+number(60/target)+' секунд реального времени.';}
+  else if(actual===0){status='measuring';message='Ожидаем завершённые шаги расчёта…';}
+  else if(actual<target-tolerance){status='limited';message='Сервер не успевает за целью: достигнут предел расчёта для текущего мира. Чтобы замедлить мир, задайте значение ниже фактической скорости.';}
+  else if(actual>target+tolerance){status='measuring';message='Уточняем фактическую скорость…';}
+  $('speedLimit').dataset.state=status;$('speedLimit').textContent=message;
+}
 async function poll(force=false){
-  if(polling||document.hidden&&!force)return;polling=true;
-  try{update(await api('/api/state'));}
-  catch(error){connectionError=true;$('dot').classList.remove('online');$('connection').textContent='Связь прервана. Переподключаемся…';$('error').textContent=error.message;}
-  finally{polling=false;}
+  // После команды нужен новый запрос: уже начатый мог получить прежнюю цель.
+  while(polling){if(!force)return;await polling;}
+  if(document.hidden&&!force)return;
+  polling=(async()=>{
+    try{update(await api('/api/state'));return true;}
+    catch(error){connectionError=true;$('dot').classList.remove('online');$('connection').textContent='Связь прервана. Переподключаемся…';$('error').textContent=error.message;return false;}
+    finally{polling=null;}
+  })();
+  return polling;
 }
 function text(tag,value,parent,cls){const node=document.createElement(tag);node.textContent=value;if(cls)node.className=cls;parent.appendChild(node);return node;}
 function table(rows,parent){const t=document.createElement('table');for(const row of rows){const tr=document.createElement('tr');for(const value of row)text('td',value,tr);t.appendChild(tr);}parent.appendChild(t);}
@@ -181,11 +202,15 @@ async function sendSpeed(){
   clearTimeout(speedTimer);
   if(speedSending||speedDraft===null)return;
   speedSending=true;const value=speedDraft;
+  if(frame)updateSpeedStatus(frame);
   const ok=await command({type:'params',values:{hoursPerMinute:value}});
   speedSending=false;
-  if(speedDraft===value){speedDraft=null;if(frame)update(frame);}
+  if(speedDraft===value){speedDraft=null;if(ok&&frame)update(frame);}
   else speedTimer=setTimeout(sendSpeed,350);
-  if(!ok&&frame)$('speed').value=frame.params.hoursPerMinute;
+  if(!ok&&speedDraft===null){
+    $('speedActual').textContent='—';$('speedLimit').dataset.state='unconfirmed';
+    $('speedLimit').textContent='Не удалось получить подтверждение скорости. Ожидаем свежие данные сервера…';
+  }
 }
 $('speedSlider').addEventListener('input',event=>{
   speedDraft=speedFromSlider(Number(event.target.value));$('speed').value=speedDraft;

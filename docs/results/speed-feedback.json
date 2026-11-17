@@ -1,0 +1,95 @@
+{
+  "date": "2026-11-18",
+  "modelVersion": "d46b75f4387f",
+  "initialProbe": {
+    "initial": {
+      "hours": 136040,
+      "org": 741,
+      "cells": 875,
+      "running": true,
+      "actualHoursPerSecond": 66.56212029912204,
+      "modelVersion": "d46b75f4387f"
+    },
+    "target": 600000
+  },
+  "clockDeltaSamples": [
+    {
+      "target": 60,
+      "actualPerMinute": 59.98,
+      "hoursAdvanced": 4,
+      "seconds": 4.002,
+      "organisms": 741,
+      "cells": 875
+    },
+    {
+      "target": 600,
+      "actualPerMinute": 599.74,
+      "hoursAdvanced": 40,
+      "seconds": 4.002,
+      "organisms": 739,
+      "cells": 875
+    },
+    {
+      "target": 6000,
+      "actualPerMinute": 4768.4,
+      "hoursAdvanced": 318,
+      "seconds": 4.001,
+      "organisms": 741,
+      "cells": 873
+    },
+    {
+      "target": 60000,
+      "actualPerMinute": 4618.54,
+      "hoursAdvanced": 308,
+      "seconds": 4.001,
+      "organisms": 750,
+      "cells": 883
+    },
+    {
+      "target": 600000,
+      "actualPerMinute": 4093.67,
+      "hoursAdvanced": 273,
+      "seconds": 4.001,
+      "organisms": 760,
+      "cells": 893
+    }
+  ],
+  "browser": {
+    "original": 600000,
+    "samples": [
+      {
+        "target": 60,
+        "state": "following",
+        "actual": "48,01 ч/мин",
+        "clockDeltaRate": 44.77,
+        "message": "Сервер выдерживает заданную скорость."
+      },
+      {
+        "target": 600000,
+        "state": "limited",
+        "actual": "20 610,01 ч/мин",
+        "clockDeltaRate": 21117.49,
+        "message": "Сервер не успевает за целью: достигнут предел расчёта для текущего мира. Чтобы замедлить мир, задайте значение ниже фактической скорости."
+      }
+    ],
+    "delayedOldState": "PASS",
+    "failedConfirmationAndRecovery": "PASS",
+    "layout": [
+      320,
+      390,
+      1280
+    ],
+    "errors": [],
+    "restored": 600000
+  },
+  "serverSource": {
+    "files": 16,
+    "different": []
+  },
+  "tests": {
+    "passed": 24,
+    "failed": 0
+  },
+  "review": "PASS",
+  "limitations": "Короткие замеры; предел меняется вместе с миром. Увеличение мощности сервера и оптимизация модели в эту правку не входят."
+}
