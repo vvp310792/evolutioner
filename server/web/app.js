@@ -5,6 +5,11 @@ const roles=['обычная','синтезирующая','пищеварите
 const colors=['#52c57f','#dcc15d','#e77586','#b094e5'];
 const ctx=$('dish').getContext('2d'),chart=$('chart').getContext('2d');
 let frame=null,owners=null,selected=null,polling=false,drawCount=0,connectionError=false;
+let catalog=null,catalogMode='',catalogLoading=false,pendingReset={type:'reset'};
+let speedDraft=null,speedTimer=null,speedSending=false;
+const speedFromSlider=position=>Math.max(1,Math.round(600000**(position/100)));
+const sliderFromSpeed=rate=>100*Math.log(rate)/Math.log(600000);
+const statLabels={sPop:'Живо клеток',sCorpse:'Трупов на поле',sLineages:'Линий живо',sExtinct:'Вымерло линий',sFights:'Схваток / выпасов',sMoves:'Перемещений',sSpores:'Прорастаний конидий',sMyco:'Грибоядность зверей',sSex:'Раздельнополость и самцы',sVir:'Свирепость штаммов',sGam:'Гамет в пути / дошедших',sSeeds:'Зачатков в почве',sSeedGerm:'Всходов / сгнивших зачатков',sBodies:'Многоклеточных',sMaxBody:'Крупнейшее тело',sDiff:'Тел с внутренними клетками',sMods:'Свободные гены',sInf:'Заражено',sKey:'Разброс замков иммунитета',sSexB:'Рождений от пола',sLight:'Текущая освещённость'};
 async function api(url,data){
   const response=await fetch(url,{cache:'no-store',...(data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{})});
   if(response.status===401){location.replace('/');throw Error('Нужен повторный вход');}
@@ -61,6 +66,9 @@ function drawChart(history){
 function update(s){
   if(connectionError){$('error').textContent='';connectionError=false;}
   frame=s;draw(s);drawChart(s.history);
+  updateDashboard(s);
+  const mode=s.params.openDiet+'-'+s.params.programBodies;
+  if(catalogMode!==mode&&!catalogLoading)loadCatalog(mode);
   $('dot').classList.add('online');$('connection').textContent=s.running?'Сервер считает · связь установлена':'Расчёт на паузе · связь установлена';
   $('clock').textContent='День '+number(Math.floor(s.hours/24)+1)+' · '+number(s.hours)+' ч';
   $('worldState').textContent=s.org===0?(s.seeds||s.gametes?'Остались зачатки':'Жизнь вымерла'):s.running?'Мир живёт':'Пауза';
@@ -73,13 +81,20 @@ function update(s){
   $('toggle').textContent=s.running?'Пауза':'Продолжить';
   for(const key of ['light','mutation','decomp','parasites']){
     if(document.activeElement!==$(key))$(key).value=s.params[key];
-    $(key+'Value').textContent=number(Number($(key).value));
+    $(key+'Value').textContent=key==='mutation'?number(Number($(key).value)*100)+'%':number(Number($(key).value));
   }
   for(const key of ['dayNight','predation','sexReprod'])if(document.activeElement!==$(key))$(key).checked=s.params[key];
-  if(document.activeElement!==$('speed')){
-    if(![...$('speed').options].some(o=>Number(o.value)===s.params.hoursPerMinute))$('speed').add(new Option(number(s.params.hoursPerMinute),s.params.hoursPerMinute));
-    $('speed').value=s.params.hoursPerMinute;
+  if(speedDraft===null){
+    if(document.activeElement!==$('speed'))$('speed').value=s.params.hoursPerMinute;
+    if(document.activeElement!==$('speedSlider'))$('speedSlider').value=sliderFromSpeed(s.params.hoursPerMinute);
   }
+  $('speedValue').textContent=number(speedDraft??s.params.hoursPerMinute)+' ч/мин';
+  $('serverSpeed').textContent=number(s.params.hoursPerMinute)+' ч/мин';
+  if(!$('resetDialog').open){
+    $('openDiet').checked=s.params.openDiet;$('programBodies').checked=s.params.programBodies;
+    $('modelMode').value=!s.params.openDiet&&!s.params.programBodies&&s.params.packageStrength===1?'legacy':s.params.openDiet&&s.params.programBodies&&s.params.packageStrength===0?'open':'custom';
+  }
+  updateScaleNotes(s);
   if(document.activeElement!==$('assistance'))$('assistance').value=s.params.packageStrength*100;
   $('assistanceValue').textContent=number(s.params.packageStrength*100)+'%';
   $('taper').disabled=s.params.packageStrength<=0||!!s.params.assistanceRamp;
@@ -94,20 +109,63 @@ async function poll(force=false){
 }
 function text(tag,value,parent,cls){const node=document.createElement(tag);node.textContent=value;if(cls)node.className=cls;parent.appendChild(node);return node;}
 function table(rows,parent){const t=document.createElement('table');for(const row of rows){const tr=document.createElement('tr');for(const value of row)text('td',value,tr);t.appendChild(tr);}parent.appendChild(t);}
+function updateDashboard(s){
+  const full=$('fullStats');full.replaceChildren();
+  table([...Object.entries(statLabels).map(([id,label])=>[label,s.readouts?.[id]??'—']),['Половых организмов',number(s.sexualLines)]],full);
+  for(const [id,key]of [['trophic','trioLegend'],['traits','sTraits'],['lifeTraits','sTraits2'],['growthStats','sOpen']])$(id).textContent=s.readouts?.[key]||'—';
+  $('eventLog').replaceChildren();for(const event of s.events||[])text('p',event.text,$('eventLog'),'hint');
+}
+async function loadCatalog(mode){
+  catalogLoading=true;
+  try{
+    catalog=await api('/api/catalog');catalogMode=mode;
+    const chosen=$('preset').value;$('preset').replaceChildren(new Option('— выбрать —',''));
+    for(const p of catalog.presets)$('preset').add(new Option(p.title,p.id));$('preset').value=chosen;
+    const ref=$('geneReference');ref.replaceChildren();
+    for(const gene of catalog.genes){
+      const d=document.createElement('details');text('summary',gene.label+' · '+gene.min+'…'+gene.max+(gene.unused?' · в этой модели не используется':''),d);
+      text('p',gene.description,d,'hint');ref.appendChild(d);
+    }
+    updateScaleNotes(frame);
+  }catch(error){$('error').textContent=error.message;}
+  finally{catalogLoading=false;}
+}
+function updateScaleNotes(s){
+  if(!s)return;
+  const legacy=!s.params.openDiet&&!s.params.programBodies&&s.params.packageStrength===1;
+  const meaning={light:'Общий множитель поступающего света.',mutation:'Сила наследуемых изменений: 0% выключает мутации, 100% задаёт максимальную силу.',decomp:'Скорость разложения органики и её доступности сапротрофам.',parasites:'Общий множитель вреда от паразитов; признаки штаммов эволюционируют отдельно.'};
+  for(const key of Object.keys(meaning)){
+    const zone=catalog?.scales[key]?.zones.find(z=>s.params[key]>=z[0]&&s.params[key]<=z[1]);
+    $(key+'Note').textContent=meaning[key]+(legacy&&zone?' Прежняя калибровка: '+zone[3]+' — '+zone[4]+'.':'');
+    $(key+'Note').dataset.zone=legacy&&zone?zone[2]:'';
+  }
+}
 const geneNames={photo:'Фотосинтез',herb:'Растительная пища',aggression:'Животная пища',sapro:'Падаль',armor:'Защита',moveSpeed:'Скорость движения',lifespan:'Срок жизни',broodSize:'Размер выводка',cycleHours:'Период размножения',thresh:'Энергетический порог',effic:'Усвоение пищи',metab:'Обмен веществ',costFrac:'Вклад в потомка',dormancy:'Глубина покоя',sexual:'Половое размножение',dioecy:'Раздельнополость',shapeA:'Глубина роста',shapeB:'Параметр прежней формы',shapeType:'Прежняя форма',minN:'Минимум соседей',maxN:'Максимум соседей',seedProv:'Вклад в зачаток',dispersal:'Расселение',myco:'Грибная пища'};
 async function inspect(url){
   try{
     const b=await api(url),content=$('bodyContent');content.replaceChildren();
     if(!b){$('bodyHint').textContent='Здесь сейчас нет живого организма.';$('refreshBody').hidden=true;selected=null;return;}
     selected=b.id;$('refreshBody').hidden=false;$('bodyHint').textContent='Организм #'+b.id+' · линия #'+b.lineage+'. Данные на момент запроса.';
-    table([['Возраст',number(b.age)+' ч'],['Тело',b.cells.length+' из '+b.planned+' клеток плана'],['Энергия',number(b.energy)],['Основное питание',names[b.guild]],['Пол',b.sex==='m'?'мужской':b.sex==='f'?'женский':'оба'],['Паразиты',b.infected?'есть':'нет']],content);
+    table([['Возраст',number(b.age)+' из '+number(b.genome.lifespan)+' ч'],['Тело',b.cells.length+' из '+b.planned+' клеток плана'],['Внутренних / барьерных клеток',b.interior+' / '+(b.cells.length-b.interior)],['Энергия',number(b.energy)],['Вложено в структуру',number(b.structuralEnergy)],['Основное питание',names[b.guild]],['Пол',b.sex==='m'?'мужской':b.sex==='f'?'женский':'гермафродит'],['Паразиты',b.infected?'есть':'нет']],content);
     const total=Object.values(b.intake).reduce((a,v)=>a+v,0);
+    text('p','Гетерозиготность: '+number(b.heterozygosity*100)+'%'+(b.infected?' · свирепость штамма '+number(b.virulence):''),content,'hint');
     text('h3','Полученная энергия за жизнь',content);
     table(Object.entries(names).map(([k,name])=>[name,number(b.intake[k]||0)+(total?' · '+number((b.intake[k]||0)/total*100)+'%':'')]),content);
     text('h3','Правила роста',content);
     for(const [i,r]of (b.genome.program||[]).entries())text('p',(i+1)+'. Поворот '+r.turn*90+'°; делений '+r.run+'; ветви '+(r.branch===3?'в обе стороны':r.branch===1?'влево':r.branch===2?'вправо':'нет')+'; '+roles[r.role]+' клетка; соединение '+(r.join?'разрешено':'выключено')+'.',content,'hint');
-    const details=document.createElement('details');text('summary','Все числовые признаки',details);
-    table(Object.entries(b.genome).filter(([k,v])=>typeof v==='number'&&!k.startsWith('__')).map(([k,v])=>[geneNames[k]||k,number(v)]),details);content.appendChild(details);
+    text('h3','Все признаки и оба набора генов',content);
+    for(const gene of b.genes){
+      const d=document.createElement('details');text('summary',gene.label+': '+number(b.genome[gene.key])+(gene.active?'':' · не действует'),d);
+      const progress=document.createElement('progress');progress.max=gene.max-gene.min;progress.value=Math.max(0,Math.min(progress.max,b.genome[gene.key]-gene.min));d.appendChild(progress);
+      table([['Диапазон',gene.min+'…'+gene.max],['Набор A',number(b.alleles.A[gene.key])],['Набор B',number(b.alleles.B[gene.key])]],d);
+      text('p',gene.description,d,'hint');content.appendChild(d);
+    }
+    text('h3','Свободные гены',content);
+    const mods=new Map();
+    for(const set of ['A','B'])for(const mod of b.alleles[set].mods||[]){const item=mods.get(mod.id)||{mod,sets:[]};item.sets.push(set);mods.set(mod.id,item);}
+    if(!mods.size)text('p','Свободных генов нет: ещё не возникли или утрачены.',content,'hint');
+    text('p','Сдвиги свободных генов указаны в процентах диапазона признака с учётом числа копий.',content,'hint');
+    for(const {mod,sets}of mods.values())text('p','№'+mod.id+' · наборы '+sets.join('/')+' · '+mod.t.map((key,i)=>(b.genes.find(g=>g.key===key)?.label||geneNames[key]||key)+': '+(mod.w[i]>=0?'+':'')+number(mod.w[i]*b.modScale*100*sets.length/2)+'%').join(', '),content,'hint');
     draw(frame);
   }catch(error){$('error').textContent=error.message;}
 }
@@ -119,9 +177,26 @@ $('dish').addEventListener('click',event=>{
 });
 $('refreshBody').addEventListener('click',()=>inspect('/api/body?id='+selected));
 $('toggle').addEventListener('click',()=>frame&&command({type:'running',value:!frame.running}));
-$('speed').addEventListener('change',event=>command({type:'params',values:{hoursPerMinute:Number(event.target.value)}}));
+async function sendSpeed(){
+  clearTimeout(speedTimer);
+  if(speedSending||speedDraft===null)return;
+  speedSending=true;const value=speedDraft;
+  const ok=await command({type:'params',values:{hoursPerMinute:value}});
+  speedSending=false;
+  if(speedDraft===value){speedDraft=null;if(frame)update(frame);}
+  else speedTimer=setTimeout(sendSpeed,350);
+  if(!ok&&frame)$('speed').value=frame.params.hoursPerMinute;
+}
+$('speedSlider').addEventListener('input',event=>{
+  speedDraft=speedFromSlider(Number(event.target.value));$('speed').value=speedDraft;
+  $('speedValue').textContent=number(speedDraft)+' ч/мин';clearTimeout(speedTimer);speedTimer=setTimeout(sendSpeed,350);
+});
+$('speedSlider').addEventListener('change',sendSpeed);
+$('speed').addEventListener('change',event=>{
+  speedDraft=Number(event.target.value);$('speedSlider').value=sliderFromSpeed(Math.max(1,speedDraft));sendSpeed();
+});
 for(const input of document.querySelectorAll('[data-param]')){
-  input.addEventListener('input',()=>$(input.id+'Value').textContent=number(input.value));
+  input.addEventListener('input',()=>$(input.id+'Value').textContent=input.id==='mutation'?number(input.value*100)+'%':number(input.value));
   input.addEventListener('change',()=>command({type:'params',values:{[input.dataset.param]:Number(input.value)}}));
 }
 for(const input of document.querySelectorAll('[data-switch]'))input.addEventListener('change',()=>command({type:'params',values:{[input.dataset.switch]:input.checked}}));
@@ -129,12 +204,29 @@ $('assistance').addEventListener('input',event=>$('assistanceValue').textContent
 $('assistance').addEventListener('change',event=>command({type:'params',values:{packageStrength:Number(event.target.value)/100}}));
 $('taper').addEventListener('click',()=>command({type:'taper'}));
 $('save').addEventListener('click',()=>command({type:'save'}));
-$('reset').addEventListener('click',()=>$('resetDialog').showModal());
-$('cancelReset').addEventListener('click',()=>$('resetDialog').close());
+function askReset(action,title){
+  pendingReset=action;$('resetTitle').textContent=title;
+  $('resetDescription').textContent='Текущий общий мир будет заменён после подтверждения. Сервер предварительно сохранит отдельную копию.';
+  $('startSummary').textContent='Основателей: '+$('founders').value+' · начальное число: '+$('seed').value;
+  $('resetError').textContent='';$('resetDialog').showModal();
+}
+$('preset').addEventListener('change',()=>{
+  const p=catalog?.presets.find(p=>p.id===$('preset').value);$('applyPreset').disabled=!p;
+  $('notePreset').textContent=p?p.note:'Свой набор настроек — двигайте ползунки ниже.';
+});
+$('applyPreset').addEventListener('click',()=>askReset({type:'preset',id:$('preset').value},'Применить «'+catalog.presets.find(p=>p.id===$('preset').value).title+'»?'));
+$('modelMode').addEventListener('change',()=>{
+  const open=$('modelMode').value==='open';askReset({type:'rules',openDiet:open,programBodies:open,packageStrength:open?0:1},'Сменить модель и начать новый мир?');
+});
+for(const key of ['openDiet','programBodies'])$(key).addEventListener('change',()=>askReset({type:'rules',openDiet:$('openDiet').checked,programBodies:$('programBodies').checked,packageStrength:frame.params.packageStrength},'Сменить правила и начать новый мир?'));
+$('seedMore').addEventListener('click',()=>command({type:'seed'}));
+$('reset').addEventListener('click',()=>askReset({type:'reset'},'Начать новый мир?'));
+$('cancelReset').addEventListener('click',()=>{$('resetDialog').close();if(frame)update(frame);});
+$('resetDialog').addEventListener('cancel',()=>setTimeout(()=>frame&&update(frame),0));
 $('confirmReset').addEventListener('click',async()=>{
   const founders=Number($('founders').value),seed=Number($('seed').value);
   if(!Number.isInteger(founders)||founders<1||founders>200||!Number.isInteger(seed)||seed<0||seed>4294967295){$('resetError').textContent='Проверьте число организмов и начальное число.';return;}
-  if(await command({type:'reset',founders,seed})){selected=null;$('bodyContent').replaceChildren();$('bodyHint').textContent='Выберите организм в чашке.';$('resetDialog').close();}
+  if(await command({...pendingReset,founders,seed})){selected=null;$('bodyContent').replaceChildren();$('bodyHint').textContent='Выберите организм в чашке.';$('resetDialog').close();if(frame)update(frame);}
 });
 $('logout').addEventListener('click',async()=>{await api('/api/logout',{});location.replace('/');});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll(true);});

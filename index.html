@@ -2132,7 +2132,16 @@
     document.getElementById('clockRate').textContent = `${params.hoursPerMinute.toLocaleString('ru-RU')} ч/мин`;
   }
 
-  function updateStats(){
+  function announceEvents(){
+    for(const gk of ['herb','pred','sapro']){
+      if(!guildsEverSeen.has(gk) && [...bodies.values()].some(b=>b.guild===gk)){
+        guildsEverSeen.add(gk);
+        logEvent('evo', `★ Впервые появились ${guildLabel(gk)}ы!`);
+        showToast(`Эволюционный прорыв: первые ${guildLabel(gk)}ы`, true);
+      }
+    }
+  }
+  function updateStats(announce=true){
     const om=OpenEvolution.metrics(bodies);
     const mode=!params.openDiet&&!params.programBodies&&params.packageStrength===1?'legacy':params.openDiet&&params.programBodies&&params.packageStrength===0?'open':'custom';
     if(document.getElementById('modelMode').value!==mode) updateModelUI();
@@ -2157,13 +2166,7 @@
       sAg+=g.aggression*n; sAr+=g.armor*n; sPh+=g.photo*n; sHe+=g.herb*n; sSa+=g.sapro*n;
       sMov+=g.moveSpeed*n; sLife+=g.lifespan*n; sBrood+=g.broodSize*n; sCyc+=g.cycleHours*n; sEf+=g.effic*n;
     }
-    for(const gk of ['herb','pred','sapro']){
-      if(counts[gk]>0 && !guildsEverSeen.has(gk)){
-        guildsEverSeen.add(gk);
-        logEvent('evo', `★ Впервые появились ${guildLabel(gk)}ы!`);
-        showToast(`Эволюционный прорыв: первые ${guildLabel(gk)}ы`, true);
-      }
-    }
+    if(announce)announceEvents();
     const set = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent = v; };
     set('sPop', pop); set('sCorpse', corpses); set('sLineages', knownLineages.size);
     set('sExtinct', extinctCount); set('sFights', actionCount); set('sMoves', moveCount);
@@ -2543,7 +2546,8 @@
     selectedBody=null;flashes=[];order.length=0;
   }
   window.evolutioner = {params,bodies,step,reset,render,updateStats,bodyTemplate,saveWorld,restoreWorld,
-    founderGenome,founderDiploid,tryPlaceBody,childGenome,applyPackages,
+    founderGenome,founderDiploid,tryPlaceBody,childGenome,applyPackages,spawnFounder,
+    presets:PRESETS,geneInfo:GENE_INFO,geneDescription,geneActive,scales:SCALES,random:()=>Math.random(),modScale:MOD_SCALE,heteroOf,announceEvents,
     get hours(){return hours;},get state(){return state;},get owner(){return owner;},
     get corpseFood(){return corpseFood;},
     get seeds(){return seeds;},get gametes(){return gametes;},

@@ -51,7 +51,7 @@ async function json(req){
   for await(const chunk of req){size+=chunk.length;if(size>8192)throw Error('Слишком большой запрос');text+=chunk;}
   return JSON.parse(text||'{}');
 }
-const staticFiles={'/':['remote.html','text/html; charset=utf-8'],'/app.js':['app.js','application/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8']};
+const staticFiles={'/':['remote.html','text/html; charset=utf-8'],'/app.js':['app.js','application/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8'],'/controls.css':['controls.css','text/css; charset=utf-8']};
 const login=fs.readFileSync(path.join(__dirname,'web/login.html'));
 const server=http.createServer(async(req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
@@ -99,6 +99,11 @@ const server=http.createServer(async(req,res)=>{
       const cell=url.pathname==='/api/cell',value=Number(url.searchParams.get('id'));
       if(!Number.isInteger(value)||value<0||(cell&&value>=46*92))return send(400,{error:'Неверный номер'});
       return send(200,await rpc({type:'detail',...(cell?{cell:value}:{body:value})}));
+    }
+    if(url.pathname==='/api/catalog'){
+      if(!authenticated)return send(401,{error:'Нужен пароль'});
+      if(workerError)return send(503,{error:'Расчёт остановлен'});
+      return send(200,await rpc({type:'catalog'}));
     }
     if(url.pathname==='/login.js'){
       res.writeHead(200,{'Content-Type':'application/javascript; charset=utf-8'});res.end(fs.readFileSync(path.join(__dirname,'web/login.js')));return;

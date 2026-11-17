@@ -1,0 +1,68 @@
+{
+  "date": "2026-11-17",
+  "tests": {
+    "passed": 24,
+    "failed": 0
+  },
+  "migration": {
+    "preservedHour": 10677,
+    "equalContinuationSteps": 30
+  },
+  "localChrome": {
+    "layout": "320/390/1280 PASS",
+    "presets": 15,
+    "rulesSwitches": "PASS",
+    "speedSliderServerValues": [
+      1,
+      600000,
+      2400
+    ],
+    "reseedWithoutReset": "PASS",
+    "cancelWithoutReset": "PASS",
+    "statsRows": 22,
+    "geneDescriptionsAndAlleles": 26,
+    "continuedWithoutPages": true,
+    "errors": []
+  },
+  "publicChrome": {
+    "checks": [
+      {
+        "url": "https://evo.valeriypolunovskiy.ru/health",
+        "status": 200
+      },
+      {
+        "url": "https://valeriypolunovskiy.ru/",
+        "status": 200
+      },
+      {
+        "url": "https://tasks.valeriypolunovskiy.ru/health",
+        "status": 200
+      }
+    ],
+    "layout": "320/390/1280 PASS",
+    "unauthState": 401,
+    "sameWorldInTwoTabs": true,
+    "continuedWithoutTabs": true,
+    "errors": [],
+    "state": {
+      "hours": 63312,
+      "org": 292,
+      "cells": 421,
+      "multi": 50,
+      "actualHoursPerSecond": 188.00741803854424,
+      "savedAt": "2026-11-17T16:32:13.289Z",
+      "modelVersion": "d46b75f4387f"
+    },
+    "presets": 15,
+    "statsRows": 22,
+    "geneDescriptions": 26,
+    "canceledActionsSentCommands": 0,
+    "currentWorldPreserved": true,
+    "speedSliderSharedValues": [
+      1,
+      600000
+    ],
+    "serverProgressRespondedToSpeed": true,
+    "restoredSpeed": 60000
+  }
+}

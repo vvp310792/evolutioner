@@ -27,8 +27,8 @@ test('второй мир не сбрасывает счётчики перво�
 test('сохранение продолжает тот же случайный мир, включая следующие рождения',()=>{
   const a=createModel(19);a.model.params.mutation=.5;
   for(let h=0;h<180;h++)a.model.step();
-  const saved=decode(encode(a.model.save()));
-  const b=createModel(999);b.model.restore(saved);
+  const saved=decode(encode(a.model.save())),events=a.model.events();
+  const b=createModel(999);b.model.restore(saved);b.model.restoreEvents(events);
   for(let h=0;h<180;h++){a.model.step();b.model.step();}
   assert.equal(digest(a.model.save()),digest(b.model.save()));
   assert.deepEqual(a.frame(),b.frame());assert.ok(a.model.api.hours===360);
@@ -36,6 +36,33 @@ test('сохранение продолжает тот же случайный �
   const fresh=spawnSync(process.execPath,[path.join(__dirname,'../tools/restore-check.js')],{input:encode(saved),maxBuffer:64*1024*1024});
   assert.equal(fresh.status,0,fresh.stderr.toString());
   assert.equal(digest(decode(fresh.stdout)),digest(a.model.save()));
+});
+test('полная панель: все пресеты из HTML, показатели без изменения мира, оба набора генов',()=>{
+  const world=createModel(19),catalog=world.catalog();
+  assert.equal(catalog.presets.length,15);assert.equal(catalog.genes.length,26);
+  assert.deepEqual(catalog.presets.map(p=>p.id),Object.keys(world.model.api.presets));
+  for(const p of catalog.presets){
+    assert.ok(p.title&&p.note);world.apply({type:'preset',id:p.id,founders:12,seed:7});
+    for(const [key,value]of Object.entries(p.values))assert.equal(world.model.params[key],value);
+    assert.equal(world.model.bodies.size,12);assert.equal(world.model.api.hours,0);
+  }
+  world.apply({type:'rules',openDiet:false,programBodies:false,packageStrength:1,founders:12,seed:7});
+  assert.equal(world.model.params.openDiet,false);assert.equal(world.model.params.programBodies,false);
+  for(let i=0;i<20;i++)world.model.step();
+  const before=digest(world.model.save()),frame=world.frame();assert.equal(digest(world.model.save()),before);
+  for(const id of ['sPop','sCorpse','sLineages','sExtinct','sFights','sMoves','sSpores','sMyco','sSex','sVir','sGam','sSeeds','sSeedGerm','sBodies','sMaxBody','sDiff','sMods','sInf','sKey','sSexB','sLight','sTraits','sTraits2','sOpen','trioLegend'])assert.ok(Object.hasOwn(frame.readouts,id),id);
+  assert.equal(Number(frame.readouts.sPop),frame.cells);
+  const body=world.detailById(world.model.bodies.keys().next().value);
+  assert.equal(body.genes.length,26);assert.ok(body.alleles.A&&body.alleles.B);assert.ok(body.genes.every(g=>g.description.length));
+  const org=world.model.bodies.size,hours=world.model.api.hours;
+  world.apply({type:'seed'});assert.equal(world.model.bodies.size,org+6);assert.equal(world.model.api.hours,hours);
+  const eventBody=world.model.bodies.values().next().value;eventBody.guild='herb';
+  const evoBefore=world.model.events().filter(e=>e.kind==='evo').length;
+  world.frame();assert.equal(world.model.events().filter(e=>e.kind==='evo').length,evoBefore);
+  world.model.api.announceEvents();world.model.api.announceEvents();
+  assert.equal(world.model.events().filter(e=>e.kind==='evo').length,evoBefore+1);
+  assert.throws(()=>validateCommand({type:'preset',id:'constructor',founders:12,seed:7}));
+  assert.throws(()=>validateCommand({type:'rules',openDiet:true,programBodies:true,packageStrength:1,founders:0,seed:7}));
 });
 test('атомарное сохранение, предыдущая копия и запрет несовместимой версии',t=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'evo-checkpoint-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
@@ -83,6 +110,7 @@ test('HTTP: пароль, защита команд, сохранение и п�
   assert.equal((await request('/api/login',{password:'wrong'})).status,401);
   const login=await request('/api/login',{password:'test-only-password'});assert.equal(login.status,200);
   cookie=login.headers.get('set-cookie').split(';')[0];assert.match(login.headers.get('set-cookie'),/HttpOnly/);assert.match(login.headers.get('set-cookie'),/SameSite=Strict/);
+  assert.equal((await(await request('/api/catalog')).json()).presets.length,15);
   assert.equal((await request('/api/command',{type:'running',value:false})).status,200);
   assert.equal((await request('/api/command',{type:'params',values:{light:999}})).status,400);
   assert.equal((await request('/api/command',{type:'params',values:{light:.91}})).status,200);
@@ -91,10 +119,14 @@ test('HTTP: пароль, защита команд, сохранение и п�
   assert.equal((await request('/api/command',{type:'save'})).status,200);
   await stop();base=await start();
   for(let i=0;i<50;i++){if((await fetch(base+'/health')).ok)break;await new Promise(r=>setTimeout(r,50));}
-  const restored=await(await request('/api/state')).json();assert.equal(restored.hours,s.hours);assert.equal(restored.grid,s.grid);assert.equal(restored.params.light,.91);assert.equal(restored.running,false);
+  const restored=await(await request('/api/state')).json();assert.equal(restored.hours,s.hours);assert.equal(restored.grid,s.grid);assert.equal(restored.params.light,.91);assert.equal(restored.running,false);assert.deepEqual(restored.events,s.events);
   assert.equal((await request('/api/command',{type:'running',value:true})).status,200);
   await new Promise(r=>setTimeout(r,750));assert.ok((await(await request('/api/state')).json()).hours>s.hours);
   assert.equal((await request('/api/command',{type:'reset',founders:12,seed:7})).status,200);
   assert.ok(fs.readdirSync(dir).some(n=>n.startsWith('before-reset-')));
+  assert.equal((await request('/api/command',{type:'preset',id:'rich',founders:12,seed:7})).status,200);
+  assert.equal((await request('/api/command',{type:'rules',openDiet:false,programBodies:false,packageStrength:1,founders:12,seed:7})).status,200);
+  const legacy=await(await request('/api/state')).json();assert.equal(legacy.params.openDiet,false);assert.equal(legacy.params.programBodies,false);
+  assert.equal((await request('/api/command',{type:'seed'})).status,200);
   assert.equal((await request('/api/logout',{})).status,200);
 });

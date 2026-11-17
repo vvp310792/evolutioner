@@ -1,0 +1,14 @@
+#modelSettings h2{margin-bottom:20px}
+#modelSettings label[for]{margin:15px 0 6px}
+.panel>h3{font-size:14px;margin:22px 0 8px}
+#fullStats{margin-top:18px}
+#fullStats td:first-child{width:45%;color:var(--muted)}
+#fullStats td:last-child{font-size:11px;line-height:1.6}
+#eventLog{max-height:240px;overflow:auto;padding-right:5px}
+#eventLog p{border-bottom:1px solid var(--line);padding-bottom:8px}
+#geneReference details{border-bottom:1px solid var(--line);margin-top:4px}
+#geneReference summary{font-size:12px;overflow-wrap:anywhere}
+progress{display:block;width:100%;height:7px;accent-color:var(--accent);margin:12px 0}
+[data-zone=bad]{border-left:3px solid #e77586;padding-left:8px}
+[data-zone=warn]{border-left:3px solid #dcc15d;padding-left:8px}
+[data-zone=good]{border-left:3px solid #52c57f;padding-left:8px}
