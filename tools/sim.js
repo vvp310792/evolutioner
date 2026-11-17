@@ -1,4 +1,5 @@
 'use strict';
+const OpenEvolution = require('../src/open-evolution.js');
 // Headless-порт нового ядра "Эволюционера": организм-центричная модель.
 // Единица симуляции — ТЕЛО (организм), а не клетка. Тело имеет генетически
 // заданную форму, общий пул энергии, общий возраст и умирает целиком.
@@ -261,8 +262,10 @@ let seeds = [];   // зачатки: {i, g, lineage, energy, kind} — 0 сем�
 let nextBodyId = 1, nextLineageId = 1;
 let hours = 0, phaseX = 0, phaseY = 0, dayFactor = 1;
 const order = [];   // переиспользуемый буфер обхода тел
-let params = { mutation: 0.12, decomp: 0.3, light: 0.62, parasites: PAR_VIR_INIT,
-               predation: true, dayNight: true, sexReprod: true };
+let params = { mutation: 0.12, decomp: 0.3, light: process.env.OPEN_DIET==='0'?0.62:0.8, parasites: PAR_VIR_INIT,
+               predation: true, dayNight: true, sexReprod: true,
+                openDiet: process.env.OPEN_DIET !== '0', programBodies: process.env.PROGRAM_BODIES !== '0',
+                packageStrength: Number(process.env.ASSISTANCE || 0) };
 function freshStats(){ return { born:0, died:0, eaten:0, moves:0, germ:0, grow:0,
   dStarve:0, dAge:0, dPred:0, noRoom:0, noSpot:0, sexBirths:0, mateFail:0, parInfect:0, parCleared:0, parSeed:0, parHours:0,
   seedMade:0, seedGerm:0, seedRot:0, seedLost:0, seedWait:0,
@@ -373,8 +376,15 @@ const bears = b => b.sex !== 'm';         // носит зачатки: женс
 const sheds = b => b.sex !== 'f';         // выпускает гаметы: мужская и гермафродит
 const sexesFit = (a, b) => !(a.sex === b.sex && a.sex !== null);
 const MATE_PATIENCE = parseInt(process.env.MP||'48',10);   // часов ожидания партнёра до клонирования
+function bodyTemplate(g) {
+  return params.programBodies ? OpenEvolution.develop(g) : templateOf(g.shapeType,g.shapeA,g.shapeB);
+}
+function applyPackages(g, pg, wasPred, A, B) {
+  return OpenEvolution.assistance(g,params.packageStrength,GENES,DISCRETE,
+    (v,a,b)=>legacyPackages(v,pg,wasPred,a,b),A,B);
+}
 function compatible(a, b) {
-  if (a.guild !== b.guild) return false;
+  if (!params.openDiet && a.guild !== b.guild) return false;
   const x = a.g, y = b.g;
   return Math.abs(x.photo-y.photo) <= SPECIES_GAP && Math.abs(x.herb-y.herb) <= SPECIES_GAP
       && Math.abs(x.aggression-y.aggression) <= SPECIES_GAP && Math.abs(x.sapro-y.sapro) <= SPECIES_GAP;
@@ -390,7 +400,7 @@ function guildOfGenome(g) {
 
 // ---------- организм ----------
 function tryPlaceBody(g, lineage, anchorX, anchorY, energy, al) {
-  const tpl = templateOf(g.shapeType, g.shapeA, g.shapeB);
+  const tpl = bodyTemplate(g);
   const [sdx, sdy] = tpl[0];                 // первая клетка шаблона — центр
   const ox = anchorX - sdx, oy = anchorY - sdy;
   const w = Math.max(...tpl.map(c=>c[0])) + 1, h = Math.max(...tpl.map(c=>c[1])) + 1;
@@ -410,7 +420,7 @@ function tryPlaceBody(g, lineage, anchorX, anchorY, energy, al) {
   // выбор. У фототрофа и сапротрофа решает ген `dioecy`: двудомная особь несёт
   // один пол, однодомная (гермафродит) — оба сразу, как большинство растений и
   // грибов. Пол разыгрывается при рождении 50/50 и потом не меняется.
-  const dio = (guild0 === 'herb' || guild0 === 'pred') ? true : Math.random() < g.dioecy;
+  const dio = params.openDiet ? Math.random()<g.dioecy : ((guild0 === 'herb' || guild0 === 'pred') ? true : Math.random() < g.dioecy);
   const body = { id, g, al: al || { A: g, B: g }, lineage, guild: guild0, ox, oy, tpl,
                  nMods: modCount(al || { A: g, B: g }),
                  sex: dio ? (Math.random() < 0.5 ? 'm' : 'f') : null,
@@ -422,6 +432,7 @@ function tryPlaceBody(g, lineage, anchorX, anchorY, energy, al) {
     const t = foot[k];
     if (state[t] === 0 && adjacentToBody(body, t)) { state[t]=1; owner[t]=id; cellGuild[t]=GCODE[body.guild]; body.cells.push(t); }
   }
+  if(params.openDiet){body.structuralEnergy=Math.max(0,body.energy)*0.2;body.energy*=0.8;}
   bodies.set(id, body);
   stats.born++; stats.bornBy[body.guild]++;
   return body;
@@ -452,7 +463,7 @@ function isBorder(body, i) {
 
 function killBody(body, corpseFrac) {
   // умирает целиком: каждая клетка тела становится трупом одновременно
-  const rel = RELEASE[body.guild] * (corpseFrac === undefined ? 1 : corpseFrac);
+  const rel = (params.openDiet ? (Math.max(0,body.energy)+(body.structuralEnergy||0))/body.cells.length : RELEASE[body.guild]) * (corpseFrac === undefined ? 1 : corpseFrac);
   for (const i of body.cells) { if (rel > 0.001) { state[i]=2; corpseFood[i]=rel; } else state[i]=0; owner[i] = 0; }
   bodies.delete(body.id);
   stats.died++; stats.diedBy[body.guild]++; stats.lifeBy[body.guild] += body.age;
@@ -490,6 +501,7 @@ function recombine(ga, gb) {
   const g = {};
   for (const k of GENES) g[k] = Math.random() < 0.5 ? ga[k] : gb[k];
   g.mods = [];
+  if(params.programBodies) g.program=OpenEvolution.programGamete(ga.program,gb.program);
   return g;
 }
 
@@ -497,6 +509,7 @@ function mutateAllele(pg, withMacro) {
   const m = params.mutation, g = {};
   for (const k of GENES) g[k] = pg[k];
   g.mods = mutateMods(pg.mods, m);
+  if (params.programBodies) g.program = OpenEvolution.mutateProgram(pg.program,m);
   for (const k of Object.keys(DRIFT)) {
     const [lo,hi] = RANGE[k];
     g[k] = clamp(pg[k] + (Math.random()*2-1)*DRIFT[k]*m, lo, hi);
@@ -545,6 +558,7 @@ function expressGenome(A, B) {
     for (let i=0;i<q.t.length;i++) { const k = q.t[i], [lo,hi] = RANGE[k]; g[k] = clamp(g[k] + 0.5*q.w[i]*MOD_SCALE*(hi-lo), lo, hi); }
   for (const k of DISCRETE) if (!DOMINANT_ONLY.has(k)) g[k] = Math.round(g[k]);
   g.maxN = Math.max(g.maxN, g.minN + 1);
+  if (params.programBodies) g.program = OpenEvolution.expressProgram(A.program,B.program);
   return g;
 }
 function gamete(al) {
@@ -561,13 +575,14 @@ function gamete(al) {
     else if (Math.random() < 0.5) h.mods.push(q);
   }
   for (const q of inB.values()) if (Math.random() < 0.5) h.mods.push(q);
+  if (params.programBodies) h.program = OpenEvolution.programGamete(al.A.program,al.B.program);
   return h;
 }
 
 // Пакеты (хищник, многоклеточность, смена ниши, основание половой линии) работают
 // по ФЕНОТИПУ и записываются обратно в ОБА аллеля: иначе подъём, ради которого
 // пакет существует, не наследуется и рассосётся в первом же поколении.
-function applyPackages(g, pg, wasPred, A, B) {
+function legacyPackages(g, pg, wasPred, A, B) {
   const before = A && B ? Object.assign({}, g) : null;
   g.__endow = 0;
   // Пакет СМЕНЫ НИШИ. Мутант-травоядное наследует photo~0.8 и получает herb~0.85 —
@@ -587,8 +602,8 @@ function applyPackages(g, pg, wasPred, A, B) {
   // впервые построившая тело, вымирает от старости раньше, чем успевает заместиться
   // (проверено прямым опытом: с коротким lifespan — ноль тел к 1000-му часу,
   // с длинным — рост с 40 подсаженных до 121 тела и 78 дифференцированных к 2000-му).
-  const tplSize = templateOf(g.shapeType, g.shapeA, g.shapeB).length;
-  const parentTpl = templateOf(pg.shapeType, pg.shapeA, pg.shapeB).length;
+  const tplSize = bodyTemplate(g).length;
+  const parentTpl = bodyTemplate(pg).length;
   // пакет срабатывает при ЛЮБОМ увеличении плана, а не только при первом выходе
   // из одноклеточности: сердцевина появляется лишь с 3x3, и переход 2x2 -> 3x3
   // нуждается в амортизации ровно так же, как самый первый шаг к телу
@@ -675,6 +690,7 @@ function childGenome(body, mate, wasPred) {
 
 function founderGenome() {
   return {
+      ...(params.programBodies ? {program:OpenEvolution.founderProgram()} : {}),
     metab: 0.22+Math.random()*0.32, effic: 0.55+Math.random()*0.25,
     thresh: 7+Math.random()*7, costFrac: 0.35+Math.random()*0.2,
     minN: Math.floor(Math.random()*2), maxN: 3+Math.floor(Math.random()*5),
@@ -713,6 +729,7 @@ function decayCorpses() {
 }
 
 function processSpores() {
+    if (params.openDiet) return;
   if (!CONIDIA_ON) return;
   for (const b of bodies.values()) if (b.guild === 'sapro') {
     for (const i of b.cells) {
@@ -765,7 +782,7 @@ function processSpores() {
 // Гамета совместима с телом, если тело той же ниши и не разошлось по пищевым
 // генам дальше видового зазора — то же правило, что у двух взрослых.
 function gameteFits(hg, b) {
-  if (b.guild !== gGuild(hg)) return false;
+  if (!params.openDiet && b.guild !== guildOfGenome(hg)) return false;
   const y = b.g;
   return Math.abs(hg.photo-y.photo) <= SPECIES_GAP && Math.abs(hg.herb-y.herb) <= SPECIES_GAP
       && Math.abs(hg.aggression-y.aggression) <= SPECIES_GAP && Math.abs(hg.sapro-y.sapro) <= SPECIES_GAP;
@@ -819,9 +836,9 @@ function fertilize(host, q) {
   macroMutate(A, B);
   const cg = expressGenome(A, B);
   applyPackages(cg, hg, host.guild === 'pred', A, B);
-  const tpl = templateOf(cg.shapeType, cg.shapeA, cg.shapeB).length;
+  const tpl = bodyTemplate(cg).length;
   const childCost = perChild * (1 + 0.35*(tpl-1));
-  const kind = host.guild === 'photo' ? 0 : host.guild === 'sapro' ? 1 : 2;
+  const kind = params.openDiet ? 0 : host.guild === 'photo' ? 0 : host.guild === 'sapro' ? 1 : 2;
   const prov = childCost * (kind === 2 ? (0.50 + cg.seedProv*EGG_PROV)
                           : kind === 1 ? (0.10 + cg.seedProv*SPORE_PROV)
                           : (0.35 + cg.seedProv*0.8));
@@ -840,7 +857,18 @@ function fertilize(host, q) {
 // Семя ждёт СВОЕГО часа: свободной клетки и света. Всхожесть детерминирована —
 // при выполненных условиях семя всходит, а не бросает кубик (то же правило, что
 // у поедания: случайность на месте решения превращает механику в шум).
-function processSeeds() {
+function openGermination(sd) {
+    if(sd.g.photo*vGrad[Math.floor(sd.i/COLS)]*dayFactor*fertility[sd.i]>=0.08) return true;
+    const nb=NB24, cell=sd.i;
+    for(let j=0;j<nb.cnt[cell];j++) {
+      const t=nb.tab[cell*nb.k+j];
+      if(state[t]===2 && sd.g.sapro*corpseFood[t]>0.08) return true;
+      if(state[t]===1){ const b=bodies.get(owner[t]);
+        if(b && OpenEvolution.capability(sd.g,b.g,params.predation).value>0.08) return true; }
+    }
+    return false;
+  }
+  function processSeeds() {
   if (!seeds.length) return;
   let w = 0;
   for (let k=0;k<seeds.length;k++) {
@@ -856,7 +884,7 @@ function processSeeds() {
       else if (s.kind === 1) {
         for (const [dx,dy] of noff) { const nx=x+dx, ny=y+dy;
           if (nx>=0&&nx<COLS&&ny>=0&&ny<ROWS && state[idx(nx,ny)]===2) { ready = true; break; } }
-      } else ready = vGrad[y]*dayFactor*fertility[s.i] >= SEED_GERM_LIGHT;
+      } else ready = params.openDiet ? openGermination(s) : vGrad[y]*dayFactor*fertility[s.i] >= SEED_GERM_LIGHT;
     }
     if (ready && Math.random() < germChance(s.g) && tryPlaceBody(s.g, s.lineage, x, y, s.energy, s.al)) {
       if (s.kind === 2) stats.eggHatch++; else if (s.kind) stats.sporeGerm++; else stats.seedGerm++;
@@ -894,6 +922,11 @@ function launchSeed(body, cg, lineage, provision, kind, al) {
 }
 
 function step() {
+    if(params.assistanceRamp){
+      const r=params.assistanceRamp;
+      params.packageStrength=OpenEvolution.assistanceAt(r.from,hours-r.start,r.duration);
+      if(hours-r.start>=r.duration) params.assistanceRamp=null;
+    }
   const hourOfDay = hours % 24;
   if (params.dayNight) dayFactor = (hourOfDay>=6 && hourOfDay<=18) ? Math.sin((hourOfDay-6)/12*Math.PI) : 0.15;
   else dayFactor = 1;
@@ -937,14 +970,15 @@ function step() {
     }
     const pace = paceOf(g.metab);   // темп обмена: множитель на весь доход
     let income = 0;
-    if (body.guild === 'photo') {
+    if (params.openDiet || body.guild === 'photo') {
       for (const i of body.cells) {
         const y = (i/COLS)|0;
-        const synth = !differentiated ? 1 : (borderMark[i] ? BORDER_SYNTH : INTERIOR_SYNTH);
+        const synth = params.programBodies ? OpenEvolution.cellEffects(body,i,COLS).synth : (!differentiated ? 1 : (isBorder(body,i) ? BORDER_SYNTH : INTERIOR_SYNTH));
         income += g.photo * vGrad[y] * dayFactor * PHOTO_GAIN * fertility[i] * synth * pace;
       }
     }
     body.energy += income;
+    if (params.openDiet) OpenEvolution.intake(body,'photo',income);
 
     // ---- апкип ----
     const guildIsHetero = body.guild !== 'photo';
@@ -965,11 +999,16 @@ function step() {
         if (cellGuild[ni] === myCode) crowdSame++;
       } }
     const moveTax = (body.guild==='herb'||body.guild==='pred') ? g.moveSpeed*0.03*size : 0;
-    const upkeep = size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
+    const upkeep = (params.openDiet ?
+      size*(g.metab+nicheSum*0.10+g.armor*0.03+g.effic*0.05+g.moveSpeed*0.03
+        +g.lifespan*SOMA+g.immunity*IMM_COST+g.myco*MYCO_COST+body.nMods*MOD_UPKEEP)
+        +crowd*0.02+body.age*senescence*AGE_SCALE(size)+size*0.015 :
+      ( size*(g.metab + dom*0.10 + (nicheSum-dom)*0.02 + g.armor*0.03 + (guildIsHetero ? g.effic*0.05 : 0))
                  + crowdSame*0.045 + (crowd-crowdSame)*0.006 + body.age*senescence*AGE_SCALE(size) + size*0.015 + moveTax
                  + size*g.lifespan*SOMA
                  + size*g.immunity*IMM_COST + size*g.myco*MYCO_COST   // содержание долговечного тела
-                 + size*body.nMods*MOD_UPKEEP;                         // содержание свободных генов
+                 + size*body.nMods*MOD_UPKEEP))
+      + (params.programBodies ? size*(g.program || []).length*0.0015 + OpenEvolution.specializationCost(body,COLS) : 0);                         // содержание свободных генов
     { const k = (body.foot.length>1 && size>=body.foot.length) ? acct.multi : (body.foot.length===1 ? acct.uni : null);
       if (k) { k.h++; k.cells += size; k.inc += income; k.upk += upkeep; } }
     { const q = gacct[body.guild]; q.h++; q.inc += income; q.upk += upkeep; }
@@ -980,7 +1019,16 @@ function step() {
 
     // ---- питание гетеротрофов: добывает барьер, перерабатывает сердцевина ----
     let ate = false, moved = false;
-    if (body.guild !== 'photo') {
+    if (params.openDiet) {
+      const result = OpenEvolution.feed(body, {state,owner,corpseFood,bodies,params,
+        border:borderCells,neighbors:NB24,sense:senseOffsets,cols:COLS,rows:ROWS,
+        interior:interiorFrac,pace,income,upkeep,moveCost:MOVE_COST,
+        kill:killBody,move:moveBody});
+      ate=result.gained>0; moved=result.moves>0;
+      stats.fedBy[body.guild]+=result.events;
+      body.guild=OpenEvolution.observedGuild(body);
+      for(const cell of body.cells) cellGuild[cell]=GCODE[body.guild];
+    } else if (body.guild !== 'photo') {
       const processing = 1 + INTERIOR_PROCESS * interiorFrac;
       let gained = 0;   // сколько энергии дал этот час кормёжки
       // итоговая доля усвоения — никогда не больше ASSIM_CAP, то есть всегда < 1
@@ -1155,7 +1203,8 @@ function step() {
       // рост не ждёт кулдауна: это не размножение, а достройка собственного тела
       if (body.energy >= growCost + g.thresh*0.35) {
         state[slot]=1; owner[slot]=body.id; cellGuild[slot]=GCODE[body.guild]; body.cells.push(slot);
-        body.energy -= growCost; stats.grow++;
+        body.energy -= growCost;
+          if(params.openDiet) body.structuralEnergy=(body.structuralEnergy||0)+growCost; stats.grow++;
       }
       continue;
     }
@@ -1164,6 +1213,7 @@ function step() {
 
     // форма достроена -> деление даёт отдельный организм
     if (body.cooldown > 0) continue;
+    if(params.openDiet && (crowd<g.minN || crowd>g.maxN*Math.max(1,size))) continue;
     // Якорь потомка нельзя брать вплотную к родителю: контур ребёнка центрируется на
     // якоре, поэтому у крупного плана он накрыл бы клетки самого родителя (забронированные)
     // и размещение отклонялось бы всегда. Зазор считается по ФАКТИЧЕСКОМУ размеру ребёнка:
@@ -1251,7 +1301,7 @@ function step() {
       const cg = kid.g;
       // крупный потомок стоит родителю пропорционально телу, которое ему предстоит
       // построить — иначе он стартует с крохами энергии и гибнет, не достроившись
-      const cTplArr = templateOf(cg.shapeType, cg.shapeA, cg.shapeB);
+      const cTplArr = bodyTemplate(cg);
       const childCost = perChildCost * (1 + 0.35*(cTplArr.length-1));
       if (body.energy < childCost + g.thresh*0.5) break;
       // ── СЕМЯ вместо подсадки вплотную: только у фототрофа и только при половом
@@ -1260,9 +1310,9 @@ function step() {
       // Носителем становится тот, кто способен носить: самец передаёт эту работу
       // партнёру целиком, потому и не платит за зачаток.
       const carrier = mate ? (bears(body) ? body : mate) : body;
-      const isEgg = EGGS_ON && (carrier.guild === 'herb' || carrier.guild === 'pred');
-      if (SEEDS_ON && mate && (carrier.guild === 'photo' || (SPORESEX_ON && carrier.guild === 'sapro') || isEgg)) {
-        const isSpore = carrier.guild === 'sapro' ? 1 : 0;
+      const isEgg = !params.openDiet && EGGS_ON && (carrier.guild === 'herb' || carrier.guild === 'pred');
+      if (SEEDS_ON && mate && (params.openDiet || carrier.guild === 'photo' || (SPORESEX_ON && carrier.guild === 'sapro') || isEgg)) {
+        const isSpore = !params.openDiet && carrier.guild === 'sapro' ? 1 : 0;
         const kind = isEgg ? 2 : isSpore;
         const prov = childCost * (kind === 2 ? (0.50 + cg.seedProv*EGG_PROV)
                                 : isSpore ? (0.10 + cg.seedProv*SPORE_PROV)
@@ -1329,6 +1379,8 @@ function mulberry32(a){ return function(){
   return ((t ^ t >>> 14) >>> 0) / 4294967296;
 }; }
 function reset(colonies=24, seed=null) {
+    OpenEvolution.reset();
+    params.assistanceRamp=null;
   if (seed !== null) Math.random = mulberry32(seed);
   state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
   seeds.length = 0; gametes.length = 0;
@@ -1413,7 +1465,7 @@ function snapshot() {
     h /= QGEN.length;
     if (b.g.sexual >= 0.5) { hetS += h; nS++; } else { hetA += h; nA++; }
   }
-  return { hours, org: bodies.size, cells, corpses, sexN, seeds: seeds.length, seedN, sporeN, eggN,
+  return { open: OpenEvolution.metrics(bodies), assistance:params.packageStrength, hours, org: bodies.size, cells, corpses, sexN, seeds: seeds.length, seedN, sporeN, eggN,
            modAvg: bodies.size? +(modSum/bodies.size).toFixed(3):0, modMax, modShare: bodies.size? +(modAny/bodies.size).toFixed(3):0,
            modSex: modSexN? +(modSexSum/modSexN).toFixed(3):0, modAsex: modAsexN? +(modAsexSum/modAsexN).toFixed(3):0,
            modTgt, modSign,
@@ -1443,7 +1495,12 @@ function killGuild(name) {
   for (const b of [...bodies.values()]) if (b.guild === name) { killBody(b, 1); bodies.delete(b.id); n++; }
   return n;
 }
-module.exports = { setLight, killGuild, compatible, get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, get seeds(){ return seeds; }, templateOf, tryPlaceBody, founderGenome,
+function startAssistanceRamp(duration=1000){
+  params.assistanceRamp={from:params.packageStrength,start:hours,duration:Math.max(1,duration)};
+}
+module.exports = { startAssistanceRamp, bodyTemplate, childGenome, mutateAllele, expressGenome, gamete, applyPackages,
+  get state(){return state;}, get owner(){return owner;}, get corpseFood(){return corpseFood;},
+  setLight, killGuild, compatible, get mv(){ return mv; }, reset, step, snapshot, get stats(){ return stats; }, params, bodies, get seeds(){ return seeds; }, templateOf, tryPlaceBody, founderGenome,
   get gacct(){ return gacct; }, gReset,
   get acct(){ return acct; }, acctReset,
   get hours(){ return hours; } };
