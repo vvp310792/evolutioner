@@ -9,5 +9,7 @@ jobs:
         with:
           node-version: 22
       - run: node --check tools/sim.js
+      - run: node --check server/main.js && node --check server/worker.js
+      - run: node --check server/web/app.js && node --check server/web/login.js
       - run: node tools/build.js --check
       - run: node --test tests/*.test.js

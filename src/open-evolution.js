@@ -13,6 +13,8 @@
   const clone = rules => (rules || []).map(r => ({...r}));
   const founderProgram = () => [{id:0, turn:0, run:0, branch:0, role:0, join:false}];
   function reset() { nextRule = 1; cache = new WeakMap(); }
+  function saveState() { return {nextRule}; }
+  function restoreState(s) { nextRule = s.nextRule; cache = new WeakMap(); }
   function mutateProgram(rules, mutation) {
     const out = clone(rules || founderProgram());
     for (const rule of out) {
@@ -220,7 +222,7 @@
   function assistanceAt(from,elapsed,duration) {
     return clip(from,0,1)*Math.max(0,1-Math.max(0,elapsed)/Math.max(1,duration));
   }
-  return {reset,founderProgram,mutateProgram,expressProgram,programGamete,clone,develop,
+  return {reset,saveState,restoreState,founderProgram,mutateProgram,expressProgram,programGamete,clone,develop,
     capability,intake,observedGuild,metrics,feed,assistance,assistanceAt,
     roleAt,cellEffects,specializationCost,ROLE_NAMES,MAX_CELLS,MAX_OPERATIONS};
 });

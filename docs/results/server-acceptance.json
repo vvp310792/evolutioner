@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-17",
+  "modelVersion": "7385f16b2334",
+  "tests": {"passed": 23, "failed": 0},
+  "migration": {"hoursPreserved": 3818, "comparedContinuationSteps": 30, "sameFullState": true},
+  "restart": {"normal": "PASS", "forcedProcessExit": "PASS", "restoredPausedHour": 4197, "sameGridAndOwners": true},
+  "chrome": {
+    "widths": [320, 390, 1280],
+    "horizontalOverflow": false,
+    "javascriptErrors": [],
+    "unauthenticatedStateStatus": 401,
+    "sameWorldInTwoTabs": true,
+    "continuedWithoutTabs": true,
+    "localEvolutionCodeInRemotePage": false,
+    "publicHealthStatus": 200,
+    "existingSiteAndTaskServiceStatus": [200, 200]
+  },
+  "serviceSamples": [
+    {"hours": 4222, "organisms": 3568, "cells": 4104, "hoursPerSecond": 5.958, "gzipBytes": 21193},
+    {"hours": 4252, "organisms": 3572, "cells": 4119, "hoursPerSecond": 7.861, "gzipBytes": 21577},
+    {"hours": 4296, "organisms": 3563, "cells": 4116, "hoursPerSecond": 9.071, "gzipBytes": 21362},
+    {"hours": 4338, "organisms": 3565, "cells": 4111, "hoursPerSecond": 5.878, "gzipBytes": 20831},
+    {"hours": 4375, "organisms": 3526, "cells": 4082, "hoursPerSecond": 9.127, "gzipBytes": 21629},
+    {"hours": 4415, "organisms": 3549, "cells": 4103, "hoursPerSecond": 8.067, "gzipBytes": 21179}
+  ],
+  "runtimeComparison": {
+    "steps": 100,
+    "virtualMachineSeconds": 17.75364108,
+    "nativeSeconds": 7.464070707,
+    "sameCanonicalStateHash": "058513aa034db7e0e9237ac187cd540edeaea4e2a3a25fe5aa69f360fa3ed7ba",
+    "phoneComparisonPerformed": false
+  }
+}

@@ -1,0 +1,5 @@
+var/
+*.evo
+*.evo.previous
+auth.json
+node_modules/

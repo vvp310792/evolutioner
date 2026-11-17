@@ -1,0 +1,26 @@
+[Unit]
+Description=Evolutioner persistent world and web interface
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/evolutioner/current
+ExecStart=%h/opt/node-v22.11.0-linux-x64/bin/node %h/.local/share/evolutioner/current/server/main.js
+Environment=EVO_DATA_DIR=%h/.local/share/evolutioner/state
+Environment=EVO_ORIGIN=https://evo.valeriypolunovskiy.ru
+Environment=PORT=8797
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+KillSignal=SIGTERM
+UMask=0077
+CPUQuota=80%
+CPUWeight=10
+MemoryMax=1G
+Nice=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
