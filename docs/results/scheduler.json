@@ -1,0 +1,220 @@
+{
+  "date": "2026-11-18",
+  "modelVersion": "d46b75f4387f",
+  "quota80": {
+    "steps": 200,
+    "repeats": 3,
+    "startHours": 2742,
+    "startOrganisms": 1529,
+    "parity": true,
+    "speedup": 1.0410132443619575,
+    "medianMs": {
+      "old": 9576.036101000005,
+      "new": 9198.764908000001
+    },
+    "cpu": {
+      "max": "80000 100000",
+      "usageUsec": 49587667,
+      "throttledUsec": 29142856,
+      "throttledPeriods": 489
+    },
+    "samples": [
+      {
+        "repeat": 0,
+        "variant": "old",
+        "type": "benchmark",
+        "elapsedMs": 9778.839232,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1227.139511684734
+      },
+      {
+        "repeat": 0,
+        "variant": "new",
+        "type": "benchmark",
+        "elapsedMs": 9489.090058,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1264.610191983911
+      },
+      {
+        "repeat": 1,
+        "variant": "new",
+        "type": "benchmark",
+        "elapsedMs": 9198.764908000001,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1304.5229571595873
+      },
+      {
+        "repeat": 1,
+        "variant": "old",
+        "type": "benchmark",
+        "elapsedMs": 9448.855652999999,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1269.9950597922423
+      },
+      {
+        "repeat": 2,
+        "variant": "old",
+        "type": "benchmark",
+        "elapsedMs": 9576.036101000005,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1253.128107855281
+      },
+      {
+        "repeat": 2,
+        "variant": "new",
+        "type": "benchmark",
+        "elapsedMs": 8999.355351999999,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1333.4288435819067
+      }
+    ]
+  },
+  "quota200": {
+    "steps": 200,
+    "repeats": 3,
+    "startHours": 2742,
+    "startOrganisms": 1529,
+    "parity": true,
+    "speedup": 1.3894041699504356,
+    "medianMs": {
+      "old": 8443.938055000002,
+      "new": 6077.380677000001
+    },
+    "cpu": {
+      "max": "200000 100000",
+      "usageUsec": 48951364,
+      "throttledUsec": 595304,
+      "throttledPeriods": 16
+    },
+    "samples": [
+      {
+        "repeat": 0,
+        "variant": "old",
+        "type": "benchmark",
+        "elapsedMs": 8498.291358,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1412.0485512306673
+      },
+      {
+        "repeat": 0,
+        "variant": "new",
+        "type": "benchmark",
+        "elapsedMs": 6092.0161100000005,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1969.7912453484957
+      },
+      {
+        "repeat": 1,
+        "variant": "new",
+        "type": "benchmark",
+        "elapsedMs": 6077.380677000001,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1974.5348593044862
+      },
+      {
+        "repeat": 1,
+        "variant": "old",
+        "type": "benchmark",
+        "elapsedMs": 8425.457580999999,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1424.2549896709286
+      },
+      {
+        "repeat": 2,
+        "variant": "old",
+        "type": "benchmark",
+        "elapsedMs": 8443.938055000002,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1421.1378531956789
+      },
+      {
+        "repeat": 2,
+        "variant": "new",
+        "type": "benchmark",
+        "elapsedMs": 6020.329815000005,
+        "hash": "382c56f9d116e5bb40d325ca448fccaf9beb42e41f414f3b1c5cddace8e42698",
+        "hours": 2942,
+        "hoursPerMinute": 1993.2462786509298
+      }
+    ]
+  },
+  "combinedSpeedup": 1.5756847579485604,
+  "realWorker": {
+    "samples": [
+      {
+        "target": 1,
+        "elapsedMs": 5000.163264000001,
+        "delta": 0,
+        "actualHoursPerMinute": 0,
+        "reportedHoursPerMinute": 0
+      },
+      {
+        "target": 60,
+        "elapsedMs": 5000.000015000001,
+        "delta": 5,
+        "actualHoursPerMinute": 59.999999819999985,
+        "reportedHoursPerMinute": 48.05828123882396
+      },
+      {
+        "target": 600000,
+        "elapsedMs": 4999.938585,
+        "delta": 165,
+        "actualHoursPerMinute": 1980.0243206387304,
+        "reportedHoursPerMinute": 1822.5555833889048
+      }
+    ],
+    "pauseLatencyMs": 651.3604230000019,
+    "pausedCpuFraction": 0.008682455776654233,
+    "pausedHours": 2997,
+    "restartRestored": true
+  },
+  "publicBrowser": {
+    "before": {
+      "hours": 44452,
+      "running": true,
+      "target": 600000,
+      "org": 222
+    },
+    "after": {
+      "hours": 46197,
+      "running": true,
+      "target": 600000,
+      "actual": 23013.80808466624,
+      "org": 299
+    },
+    "elapsedSeconds": 5.018258499912918,
+    "readOnly": true,
+    "layout": [
+      320,
+      390,
+      1280
+    ],
+    "errors": []
+  },
+  "serverSource": {
+    "files": 18,
+    "different": []
+  },
+  "tests": {
+    "passed": 24,
+    "failed": 0
+  },
+  "review": "PASS",
+  "limitations": [
+    "Парный benchmark использует одинаковые точки публикации каждые20шагов и отключает периодическое сохранение; реальный worker проверен отдельно.",
+    "Digest исключает восстанавливаемые кэши tpl и roleMap.",
+    "Замер одного сохранённого мира, а не сравнение телефона и сервера; скорость зависит от экосистемы.",
+    "Цель1ч/мин проверена только5секунд: это проверка отсутствия лишних шагов, а не полного интервала60секунд. Короткое окно reported может колебаться; реальный темп сверяется по часам мира."
+  ]
+}

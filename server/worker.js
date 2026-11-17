@@ -44,7 +44,11 @@ function tick(){
     const deadline=now+12;
     while(budget>=1&&performance.now()<deadline){world.model.step();budget--;}
   }else budget=0;
-  setTimeout(tick,12);
+  // При долге шагов уступаем очередь командам без обязательного простоя.
+  // В медленном режиме учитываем время самой пачки до следующего целого часа.
+  const wait=running?(1-budget)*60000/world.model.params.hoursPerMinute-(performance.now()-lastTick):100;
+  if(wait<=0)setImmediate(tick);
+  else setTimeout(tick,Math.min(100,Math.max(1,Math.ceil(wait))));
 }
 parentPort.on('message',message=>{
   const {id}=message;

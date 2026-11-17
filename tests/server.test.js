@@ -129,6 +129,12 @@ test('HTTP: пароль, защита команд, сохранение и п�
     await new Promise(r=>setTimeout(r,100));
   }
   assert.ok(fast.speedMeasurementReady);assert.ok(fast.actualHoursPerSecond>1);
+  const pauseStarted=performance.now();
+  assert.equal((await request('/api/command',{type:'running',value:false})).status,200);
+  assert.ok(performance.now()-pauseStarted<5000,'Команда паузы не должна ждать опустошения бюджета');
+  const pausedFast=await(await request('/api/state')).json();assert.equal(pausedFast.running,false);
+  await new Promise(r=>setTimeout(r,650));assert.equal((await(await request('/api/state')).json()).hours,pausedFast.hours);
+  assert.equal((await request('/api/command',{type:'running',value:true})).status,200);
   assert.equal((await request('/api/command',{type:'params',values:{hoursPerMinute:60}})).status,200);
   const changed=await(await request('/api/state')).json();assert.equal(changed.speedMeasurementReady,false);assert.equal(changed.actualHoursPerSecond,0);
   await new Promise(r=>setTimeout(r,2700));
