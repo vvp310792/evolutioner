@@ -457,28 +457,34 @@
     }
     return {mixed, programAvg:bodies.size?programSum/bodies.size:0, programMax, specializedPlans, intake:energy};
   }
+  let seenMark=null, seenStamp=0, tgtCell=new Int32Array(256), tgtValue=new Float64Array(256), tgtHerb=new Float64Array(256);
   function feed(body, w) {
     const g=body.g, size=body.cells.length;
-    const seen=new Set(), targets=[];
-    const nb=w.neighbors;
-    for (const cell of w.border) for (let j=0;j<nb.cnt[cell];j++) {
-      const t=nb.tab[cell*nb.k+j];
-      if (seen.has(t)) continue;
-      seen.add(t);
-      if (w.state[t]===2 && g.sapro>0) targets.push({t,value:g.sapro,dead:true});
-      else if (w.state[t]===1 && w.owner[t]!==body.id) {
-        const victim=w.bodies.get(w.owner[t]);
-        if (victim) {
-          const c=capability(g,victim.g,w.params.predation);
-          if(c.value>0) targets.push({t,...c,dead:false});
-        }
+    const nb=w.neighbors, state=w.state, owner=w.owner, id=body.id, bodyAt=w.bodyAt;
+    // Метка вместо Set и типизированные массивы вместо объектов на каждую клетку:
+    // порядок целей и сумм тот же, поэтому розыгрыш даёт те же случайные числа.
+    if(!seenMark||seenMark.length<state.length) seenMark=new Int32Array(state.length);
+    if(++seenStamp>2e9){seenMark.fill(0);seenStamp=1;}
+    if(tgtCell.length<w.border.length*nb.k){const n=w.border.length*nb.k*2;tgtCell=new Int32Array(n);tgtValue=new Float64Array(n);tgtHerb=new Float64Array(n);}
+    let count=0, total=0, lastOwner=-1, lastCap=null;
+    for (const cell of w.border) for (let j=0,c=nb.cnt[cell],base=cell*nb.k;j<c;j++) {
+      const t=nb.tab[base+j];
+      if (seenMark[t]===seenStamp) continue;
+      seenMark[t]=seenStamp;
+      const st=state[t];
+      if (st===2 && g.sapro>0) {tgtCell[count]=t;tgtValue[count]=g.sapro;tgtHerb[count]=-1;count++;total+=g.sapro;}
+      else if (st===1 && owner[t]!==id) {
+        const o=owner[t];
+        // Соседние клетки цели обычно принадлежат одному телу: способность считается раз на тело.
+        if(o!==lastOwner){lastOwner=o;const victim=bodyAt?bodyAt[t]:w.bodies.get(o);lastCap=victim?capability(g,victim.g,w.params.predation):null;}
+        if(lastCap && lastCap.value>0){tgtCell[count]=t;tgtValue[count]=lastCap.value;tgtHerb[count]=lastCap.herb;count++;total+=lastCap.value;}
       }
     }
     let gained=0, events=0;
-    const total=targets.reduce((n,t)=>n+t.value,0);
     if (total>0) {
-      let draw=Math.random()*total, target=targets[targets.length-1];
-      for (const t of targets) { draw-=t.value; if(draw<=0){target=t;break;} }
+      let draw=Math.random()*total, k=count-1;
+      for (let j=0;j<count;j++) { draw-=tgtValue[j]; if(draw<=0){k=j;break;} }
+      const target={t:tgtCell[k],value:tgtValue[k],herb:tgtHerb[k],dead:tgtHerb[k]<0};
       const feeding=w.border.reduce((n,c)=>n+cellEffects(body,c,w.cols).feed,0)/Math.max(1,w.border.length);
       const bites=Math.min(w.border.length,6)*feeding, processing=body.tpl?.roles?1:1+0.35*w.interior;
       // Скорость обмена повышает пропускную способность; доля усвоения остаётся < 1.
@@ -490,7 +496,7 @@
         if(w.corpseFood[target.t]<=0.001){w.state[target.t]=0;w.corpseFood[target.t]=0;}
         if(gained>0) events++;
       } else {
-        const victim=w.bodies.get(w.owner[target.t]);
+        const victim=bodyAt?bodyAt[target.t]:w.bodies.get(w.owner[target.t]);
         if(victim) {
           const power=(body.energy/size)*(0.6+g.aggression*1.15);
           const defense=(victim.energy/victim.cells.length)*(0.5+(victim.g.armor+0.45)*cellEffects(victim,target.t,w.cols).armor);
@@ -517,7 +523,7 @@
         let score=0;
         if(w.state[t]===2) score=g.sapro*w.corpseFood[t];
         else if(w.state[t]===1 && w.owner[t]!==body.id){
-          const v=w.bodies.get(w.owner[t]);
+          const v=bodyAt?bodyAt[t]:w.bodies.get(w.owner[t]);
           if(v) score=capability(g,v.g,w.params.predation).value*Math.max(0,v.energy/v.cells.length);
         }
         score/=(1+Math.abs(dx)+Math.abs(dy));
@@ -580,6 +586,10 @@
   let fertility = new Float32Array(N);
 
   let bodies = new Map();               // id -> организм (см. tryPlaceBody)
+  // Живая клетка -> её тело. Дублирует bodies.get(owner[i]) для клеток с state 1:
+  // поиск в словаре на каждую соседнюю клетку был главной статьёй кормёжки.
+  // Пишется ровно там же, где owner, и пересобирается при загрузке мира.
+  const cellBody = new Array(N).fill(null);
   let nextBodyId = 1, nextLineageId = 1;
 
   let hours = 0, extinctCount = 0, actionCount = 0, moveCount = 0, sporeGermCount = 0, sexBirths = 0, infectCount = 0;
@@ -1068,11 +1078,11 @@
                    nMods: modCount(al || { A: g, B: g }),
                    sex: dio ? (Math.random()<0.5 ? 'm' : 'f') : null,
                    cells:[i0], energy, age:0, cooldown:g.cycleHours };
-    state[i0]=1; owner[i0]=id; cellGuild[i0]=GCODE[body.guild];
+    state[i0]=1; owner[i0]=id; cellBody[i0]=body; cellGuild[i0]=GCODE[body.guild];
     const want = Math.min(foot.length, 1 + Math.floor(foot.length/3));  // зачаток — сразу комок
     for(let k=0;k<foot.length && body.cells.length<want;k++){
       const t = foot[k];
-      if(state[t]===0 && adjacentToBody(body,t)){ state[t]=1; owner[t]=id; cellGuild[t]=GCODE[body.guild]; body.cells.push(t); }
+      if(state[t]===0 && adjacentToBody(body,t)){ state[t]=1; owner[t]=id; cellBody[t]=body; cellGuild[t]=GCODE[body.guild]; body.cells.push(t); }
     }
     if(params.openDiet){body.structuralEnergy=Math.max(0,body.energy)*0.2;body.energy*=0.8;}
     bodies.set(id, body);
@@ -1084,7 +1094,7 @@
     const rel = (params.openDiet ? (Math.max(0,body.energy)+(body.structuralEnergy||0))/body.cells.length : RELEASE[body.guild]) * (corpseFrac===undefined ? 1 : corpseFrac);
     for(const i of body.cells){
       if(rel > 0.001){ state[i]=2; corpseFood[i]=rel; } else state[i]=0;
-      owner[i]=0; cellGuild[i]=G_NONE;
+      owner[i]=0; cellBody[i]=null; cellGuild[i]=G_NONE;
     }
     if(selectedBody === body.id) selectedBody = null;
     bodies.delete(body.id);
@@ -1105,24 +1115,27 @@
       if(x<0||x>=COLS||y<0||y>=ROWS) return false;
       newFoot.push(idx(x,y));
     }
-    for(const i of body.cells){ state[i]=0; owner[i]=0; cellGuild[i]=G_NONE; }
+    for(const i of body.cells){ state[i]=0; owner[i]=0; cellBody[i]=null; cellGuild[i]=G_NONE; }
     const gc = GCODE[body.guild];
-    for(const t of targets){ state[t]=1; owner[t]=body.id; cellGuild[t]=gc; }
+    for(const t of targets){ state[t]=1; owner[t]=body.id; cellBody[t]=body; cellGuild[t]=gc; }
     body.cells = targets; body.foot = newFoot; body.ox += dx; body.oy += dy;
     moveCount++;
     return true;
   }
 
+  // Списки ключей заведены один раз: мутация идёт на каждого потомка, и новые
+  // массивы на каждый вызов заметно грузили сборщик мусора.
+  const DRIFT_KEYS = Object.keys(DRIFT), STEP_KEYS = ['minN','maxN','broodSize','shapeA','shapeB'];
   function mutateAllele(pg, withMacro){
     const m = params.mutation, g = {};
     for(const k of GENES) g[k] = pg[k];
     g.mods = mutateMods(pg.mods, m);
     if (params.programBodies) g.program = OpenEvolution.mutateProgram(pg.program,m);
-    for(const k of Object.keys(DRIFT)){
+    for(const k of DRIFT_KEYS){
       const [lo,hi] = RANGE[k];
       g[k] = clamp(pg[k] + (Math.random()*2-1)*DRIFT[k]*m, lo, hi);
     }
-    for(const k of ['minN','maxN','broodSize','shapeA','shapeB']){
+    for(const k of STEP_KEYS){
       const [lo,hi] = RANGE[k];
       g[k] = clamp(pg[k] + (Math.random() < m*0.45 ? (Math.random()<0.5?-1:1) : 0), lo, hi);
     }
@@ -1488,6 +1501,8 @@
   }
 
   const order = [];
+  const feedCtx = {state:null,owner:null,corpseFood:null,bodies:null,params:null,border:null,neighbors:null,sense:null,
+    cols:0,rows:0,interior:0,pace:0,income:0,upkeep:0,moveCost:0,kill:null,move:null,bodyAt:null};
   function step(){
     if(params.assistanceRamp){
       const r=params.assistanceRamp;
@@ -1573,10 +1588,14 @@
 
       let ate = false, moved = false;
       if (params.openDiet) {
-      const result = OpenEvolution.feed(body, {state,owner,corpseFood,bodies,params,
-        border:borderCells,neighbors:NB24,sense:senseOffsets,cols:COLS,rows:ROWS,
-        interior:interiorFrac,pace,income,upkeep,moveCost:MOVE_COST,
-        kill:killBody,move:moveBody});
+      // Контекст кормёжки один на весь мир: новый объект на каждое тело каждый час
+      // был одной из самых горячих строк профиля. feed его не хранит.
+      const fc = feedCtx;
+      fc.state=state; fc.owner=owner; fc.corpseFood=corpseFood; fc.bodies=bodies; fc.params=params;
+      fc.neighbors=NB24; fc.sense=senseOffsets; fc.cols=COLS; fc.rows=ROWS; fc.moveCost=MOVE_COST;
+      fc.kill=killBody; fc.move=moveBody; fc.bodyAt=cellBody;
+      fc.border=borderCells; fc.interior=interiorFrac; fc.pace=pace; fc.income=income; fc.upkeep=upkeep;
+      const result = OpenEvolution.feed(body, fc);
       ate=result.gained>0; moved=result.moves>0;
       actionCount+=result.events;
       body.guild=OpenEvolution.observedGuild(body);
@@ -1772,7 +1791,7 @@
       }
       if(slot >= 0){
         if(body.energy >= growCost + g.thresh*0.35){
-          state[slot]=1; owner[slot]=body.id; cellGuild[slot]=GCODE[body.guild]; body.cells.push(slot);
+          state[slot]=1; owner[slot]=body.id; cellBody[slot]=body; cellGuild[slot]=GCODE[body.guild]; body.cells.push(slot);
           body.energy -= growCost;
           if(params.openDiet) body.structuralEnergy=(body.structuralEnergy||0)+growCost;
         }
@@ -1798,7 +1817,7 @@
           if(nx<0||nx>=COLS||ny<0||ny>=ROWS) continue;
           const ni = idx(nx,ny);
           if(state[ni]!==1 || owner[ni]===body.id) continue;
-          const cand = bodies.get(owner[ni]);
+          const cand = cellBody[ni];
           if(!cand || cand.cooldown > 0) continue;
           if(cand.energy < cand.g.thresh*0.5) continue;   // партнёр должен быть в силах
           if(cand.g.sexual < 0.15) continue;
@@ -1900,12 +1919,17 @@
         if(!body.par || body.par.load < 0.25) continue;
         const src = body.cells[Math.floor(Math.random()*body.cells.length)];
         const c = NB24.cnt[src], base = src*NB24.k;
+        // Соседние клетки почти всегда одного хозяина: поиск тела и сродство ключей
+        // считаются раз на хозяина, а бросок заражения остаётся на каждую клетку.
+        let lastO = -1, host = null, fit = 0;
         for(let o=0;o<c;o++){
           const ni = NB24.tab[base+o];
           if(state[ni]!==1 || owner[ni]===body.id) continue;
-          const host = bodies.get(owner[ni]);
+          if(owner[ni]!==lastO){
+            lastO = owner[ni]; host = cellBody[ni];
+            if(host && !host.par) fit = keyDist(body.par.key, host.g.immuneKey) < MATCH_W ? 1 : 0.12;
+          }
           if(!host || host.par) continue;
-          const fit = keyDist(body.par.key, host.g.immuneKey) < MATCH_W ? 1 : 0.12;
           if(Math.random() < PAR_INF * virInf(body.par.vir) * fit * (1 - host.g.immunity*0.85)){   // заразнее тот, кто свирепее
             let k = body.par.key + (Math.random()*2-1)*0.04;   // ключ мутирует при передаче
             const nv = Math.min(VIR_RANGE, Math.max(0, body.par.vir + (Math.random()*2-1)*VIR_MUT));
@@ -1961,7 +1985,7 @@
   function reset(){
     OpenEvolution.reset();
     params.assistanceRamp=null;
-    state.fill(0); owner.fill(0); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
+    state.fill(0); owner.fill(0); cellBody.fill(null); cellGuild.fill(G_NONE); corpseFood.fill(0); sporeDensity.fill(0);
     bodies.clear(); nextBodyId = 1; nextLineageId = 1; nextModId = 1; selectedBody = null;
 
     phaseX = Math.random()*10; phaseY = Math.random()*10;
@@ -2537,6 +2561,7 @@
       // План и кэш ролей восстанавливаются из генома, а не из формата сериализатора.
       b.tpl=bodyTemplate(b.g);delete b.roleMap;bodies.set(b.id,b);
     }
+    for(let i=0;i<N;i++) cellBody[i]=state[i]===1?(bodies.get(owner[i])||null):null;
     gametes.length=0;gametes.push(...s.gametes);seeds.length=0;seeds.push(...s.seeds);
     ({nextBodyId,nextLineageId,nextModId,hours,extinctCount,actionCount,moveCount,sporeGermCount,
       sexBirths,infectCount,popHistory,lineageHueJitter,phaseX,phaseY,dayFactor,allExtinctNotified,

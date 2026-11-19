@@ -1,0 +1,17 @@
+{
+  "date": "2026-11-19",
+  "host": "bioinfo, node v22.11.0, без ограничения квоты",
+  "world": {"startHours": 10677, "startOrganisms": 1693, "source": "копия живого мира до вымирания"},
+  "baselineModel": "d46b75f4387f",
+  "runs": [
+    {"steps": 300, "variant": "old", "ms": [4849, 4768, 4781, 4850], "organisms": 1642, "hours": 10977, "digest16": "459fd7401dfb53ec"},
+    {"steps": 300, "variant": "new", "ms": [3483, 3537, 3511, 3626], "organisms": 1642, "hours": 10977, "digest16": "459fd7401dfb53ec"},
+    {"steps": 1500, "variant": "old", "ms": [20406], "organisms": 1389, "hours": 12177, "digest16": "188e094d68425373"},
+    {"steps": 1500, "variant": "new+invariant-check", "ms": [15500], "organisms": 1389, "hours": 12177, "digest16": "188e094d68425373"}
+  ],
+  "speedup300": 1.35,
+  "parity": true,
+  "invariant": "перед каждым из 1500 шагов: для state 1 cellBody[i] === bodies.get(owner[i]), иначе null",
+  "rejected": "кэш сродства через WeakMap: 3.77 → 4.02 с, медленнее",
+  "limits": "одна копия мира; скорость зависит от численности и строения тел; на телефоне не измерялось"
+}

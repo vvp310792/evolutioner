@@ -126,28 +126,34 @@
     }
     return {mixed, programAvg:bodies.size?programSum/bodies.size:0, programMax, specializedPlans, intake:energy};
   }
+  let seenMark=null, seenStamp=0, tgtCell=new Int32Array(256), tgtValue=new Float64Array(256), tgtHerb=new Float64Array(256);
   function feed(body, w) {
     const g=body.g, size=body.cells.length;
-    const seen=new Set(), targets=[];
-    const nb=w.neighbors;
-    for (const cell of w.border) for (let j=0;j<nb.cnt[cell];j++) {
-      const t=nb.tab[cell*nb.k+j];
-      if (seen.has(t)) continue;
-      seen.add(t);
-      if (w.state[t]===2 && g.sapro>0) targets.push({t,value:g.sapro,dead:true});
-      else if (w.state[t]===1 && w.owner[t]!==body.id) {
-        const victim=w.bodies.get(w.owner[t]);
-        if (victim) {
-          const c=capability(g,victim.g,w.params.predation);
-          if(c.value>0) targets.push({t,...c,dead:false});
-        }
+    const nb=w.neighbors, state=w.state, owner=w.owner, id=body.id, bodyAt=w.bodyAt;
+    // Метка вместо Set и типизированные массивы вместо объектов на каждую клетку:
+    // порядок целей и сумм тот же, поэтому розыгрыш даёт те же случайные числа.
+    if(!seenMark||seenMark.length<state.length) seenMark=new Int32Array(state.length);
+    if(++seenStamp>2e9){seenMark.fill(0);seenStamp=1;}
+    if(tgtCell.length<w.border.length*nb.k){const n=w.border.length*nb.k*2;tgtCell=new Int32Array(n);tgtValue=new Float64Array(n);tgtHerb=new Float64Array(n);}
+    let count=0, total=0, lastOwner=-1, lastCap=null;
+    for (const cell of w.border) for (let j=0,c=nb.cnt[cell],base=cell*nb.k;j<c;j++) {
+      const t=nb.tab[base+j];
+      if (seenMark[t]===seenStamp) continue;
+      seenMark[t]=seenStamp;
+      const st=state[t];
+      if (st===2 && g.sapro>0) {tgtCell[count]=t;tgtValue[count]=g.sapro;tgtHerb[count]=-1;count++;total+=g.sapro;}
+      else if (st===1 && owner[t]!==id) {
+        const o=owner[t];
+        // Соседние клетки цели обычно принадлежат одному телу: способность считается раз на тело.
+        if(o!==lastOwner){lastOwner=o;const victim=bodyAt?bodyAt[t]:w.bodies.get(o);lastCap=victim?capability(g,victim.g,w.params.predation):null;}
+        if(lastCap && lastCap.value>0){tgtCell[count]=t;tgtValue[count]=lastCap.value;tgtHerb[count]=lastCap.herb;count++;total+=lastCap.value;}
       }
     }
     let gained=0, events=0;
-    const total=targets.reduce((n,t)=>n+t.value,0);
     if (total>0) {
-      let draw=Math.random()*total, target=targets[targets.length-1];
-      for (const t of targets) { draw-=t.value; if(draw<=0){target=t;break;} }
+      let draw=Math.random()*total, k=count-1;
+      for (let j=0;j<count;j++) { draw-=tgtValue[j]; if(draw<=0){k=j;break;} }
+      const target={t:tgtCell[k],value:tgtValue[k],herb:tgtHerb[k],dead:tgtHerb[k]<0};
       const feeding=w.border.reduce((n,c)=>n+cellEffects(body,c,w.cols).feed,0)/Math.max(1,w.border.length);
       const bites=Math.min(w.border.length,6)*feeding, processing=body.tpl?.roles?1:1+0.35*w.interior;
       // Скорость обмена повышает пропускную способность; доля усвоения остаётся < 1.
@@ -159,7 +165,7 @@
         if(w.corpseFood[target.t]<=0.001){w.state[target.t]=0;w.corpseFood[target.t]=0;}
         if(gained>0) events++;
       } else {
-        const victim=w.bodies.get(w.owner[target.t]);
+        const victim=bodyAt?bodyAt[target.t]:w.bodies.get(w.owner[target.t]);
         if(victim) {
           const power=(body.energy/size)*(0.6+g.aggression*1.15);
           const defense=(victim.energy/victim.cells.length)*(0.5+(victim.g.armor+0.45)*cellEffects(victim,target.t,w.cols).armor);
@@ -186,7 +192,7 @@
         let score=0;
         if(w.state[t]===2) score=g.sapro*w.corpseFood[t];
         else if(w.state[t]===1 && w.owner[t]!==body.id){
-          const v=w.bodies.get(w.owner[t]);
+          const v=bodyAt?bodyAt[t]:w.bodies.get(w.owner[t]);
           if(v) score=capability(g,v.g,w.params.predation).value*Math.max(0,v.energy/v.cells.length);
         }
         score/=(1+Math.abs(dx)+Math.abs(dy));
