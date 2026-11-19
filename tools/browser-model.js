@@ -37,10 +37,10 @@ module.exports=function browserModel(seed=1,{native=false}={}){
   const api=context.evolutioner;
   return {params:api.params,bodies:api.bodies,step:api.step,
     presetTitles:Object.fromEntries([...html.match(/<select id="preset">([\s\S]*?)<\/select>/)[1].matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g)].map(m=>[m[1],m[2]])),
-    readouts(){
+    readouts(rates){
       // Сбор показателей не должен менять мир или выдавать повторные эволюционные события.
-      api.updateStats(false);
-      return Object.fromEntries([...elements].filter(([id])=>/^s[A-Z]|^trioLegend$/.test(id)).map(([id,el])=>[id,String(el.textContent??'')]));
+      api.updateStats(false,rates);
+      return Object.fromEntries([...elements].filter(([id])=>/^s[A-Z]|^trioLegend$|^mean(Mut|Regen|Par)$/.test(id)).map(([id,el])=>[id,String(el.textContent??'')]));
     },
     events(){return elements.get('log').children.map(el=>({kind:el.className,text:el.textContent}));},
     restoreEvents(events=[]){const log=elements.get('log');log.innerHTML='';for(const e of events.slice(0,24)){const row=element();row.className=e.kind;row.textContent=e.text;log.appendChild(row);}},

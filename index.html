@@ -218,14 +218,16 @@
       <input type="range" id="speed" min="0" max="100" value="46">
     </div>
     <div class="field">
-      <label>Сила мутации <b id="lblMut">12%</b></label>
+      <label for="mutation"><span id="titleMut">Мутабельность основателей</span> <b id="lblMut">12%</b></label>
       <input type="range" id="mutation" min="0" max="100" value="12">
       <div class="scalenote" id="noteMut"></div>
+      <div class="scalenote" id="meanMut"></div>
     </div>
     <div class="field">
-      <label>Давление паразитов <b id="lblPar">1.00</b></label>
+      <label for="parasites"><span id="titlePar">Вред новых штаммов</span> <b id="lblPar">1.00</b></label>
       <input type="range" id="parasites" min="0" max="300" value="100">
       <div class="scalenote" id="notePar"></div>
+      <div class="scalenote" id="meanPar"></div>
     </div>
     <div class="field">
       <label>Освещённость <b id="lblLight">0.80</b></label>
@@ -233,9 +235,10 @@
       <div class="scalenote" id="noteLight"></div>
     </div>
     <div class="field">
-      <label>Скорость разложения <b id="lblRegen">0.30</b></label>
-      <input type="range" id="regen" min="5" max="90" value="30">
+      <label for="regen"><span id="titleRegen">Разложение у основателей</span> <b id="lblRegen">0.30</b></label>
+      <input type="range" id="regen" min="0" max="100" value="30">
       <div class="scalenote" id="noteRegen"></div>
+      <div class="scalenote" id="meanRegen"></div>
     </div>
     <div class="field">
       <label>Фототрофов-основателей</label>
@@ -489,7 +492,7 @@
       const bites=Math.min(w.border.length,6)*feeding, processing=body.tpl?.roles?1:1+0.35*w.interior;
       // Скорость обмена повышает пропускную способность; доля усвоения остаётся < 1.
       if (target.dead) {
-        const drain=Math.min(w.corpseFood[target.t],g.sapro*w.params.decomp*9*Math.sqrt(size)*bites*w.pace);
+        const drain=Math.min(w.corpseFood[target.t],g.sapro*(g.decomp ?? w.params.decomp)*9*Math.sqrt(size)*bites*w.pace);
         w.corpseFood[target.t]=Math.max(0,w.corpseFood[target.t]-drain);
         gained=drain*Math.min(0.9,0.8*g.effic*processing);
         intake(body,'sapro',gained);
@@ -619,7 +622,7 @@
     dispersal:'Дальность расселения общего покоящегося зачатка.',
     seedProv:'Энергия общего зачатка. Цена оплачивается родителями.'
   };
-  const params = { hoursPerMinute:24, mutation:0.12, decomp:0.3, light:0.8, parasites:1.0, predation:true, dayNight:true, sexReprod:true, openDiet:true, programBodies:true, packageStrength:0 };
+  const params = { hoursPerMinute:24, mutation:0.12, decomp:0.3, light:0.8, parasites:1.0, predation:true, dayNight:true, sexReprod:true, openDiet:true, programBodies:true, heritableRates:true, packageStrength:0 };
   const geneDescription=(k,desc)=>((k==='shapeA'?params.programBodies:params.openDiet)&&OPEN_GENE_TEXT[k])||desc;
 
   const PHOTO_GAIN = 3.0, MACRO_MUT_CHANCE = 0.13, MOVE_COST = 0.10;
@@ -733,6 +736,7 @@
   // оптимум лёг бы на край шкалы и признак был бы мёртв (замерено на линейной
   // версии: вирулентность уехала к 1.218 при потолке 1.6 и встала там).
   const VIR_INF_LO = 0.35, VIR_K = 0.5, VIR_MUT = 0.06, VIR_RANGE = 1.6;
+  const STRAIN_VIR_MAX = 3, STRAIN_INF_MUT = 0.04, STRAIN_INF_START = 0.675;
   const virInf = v => VIR_INF_LO + (1-VIR_INF_LO) * (v/(v+VIR_K));
   const keyDist = (a,b)=>{ const d = Math.abs(a-b); return d < 0.5 ? d : 1-d; };
   // PACE — обмен веществ это СКОРОСТЬ, а не только расход: множитель на весь доход,
@@ -747,7 +751,7 @@
 
   // ─── СПРАВОЧНИК ГЕНОВА. Единый источник правды: из него строятся и таблица на
   //     странице, и инспектор по клику. Диапазоны здесь обязаны совпадать с RANGE.
-  const GENE_INFO = [
+  const LEGACY_GENE_INFO = [
     ['photo',      'фотосинтез',      0,1,      'Доход от света: photo × освещённость × 3.0 × плодородие. Наибольший из четырёх пищевых генов задаёт нишу.'],
     ['herb',       'травоядность',    0,1,      'Шанс укуса фототрофа (herb × 0.45 на клетку барьера) и объём высасываемого (до herb × 2.6).'],
     ['aggression', 'хищность',        0,1,      'Шанс атаки (× 0.65) и сила удара (0.6 + aggression × 1.15). Хищники едят и травоядных, и друг друга.'],
@@ -775,7 +779,15 @@
     ['dioecy',     'раздельнополость',0,1,     'Только у фототрофа и сапротрофа: с какой вероятностью особь родится ОДНОПОЛОЙ (двудомность) вместо гермафродита (однодомность). У травоядных и хищников пола два всегда — у животных раздельнополость правило, а не выбор. Цена двудомности — половина популяции не носит потомства; выигрыш — специализация: самец делает гаметы вдвое дешевле, самка вынашивает на 15% дешевле гермафродита.'],
     ['sexual',     'половое размн.',  0,1,      'Склонность искать партнёра вместо клонирования. Потомок получает каждый ген от одного из двух родителей броском монеты. Партнёр обязан быть той же ниши и генетически близким — отдельного поля «вид» в коде нет, расхождение по пищевым генам само разводит линии. Не дождавшись партнёра за 48 часов, организм размножается клонально. У фототрофа половое размножение идёт СЕМЕНАМИ, у сапротрофа — СПОРАМИ: потомок не подсаживается вплотную, а забрасывается на расстояние и лежит в почве, пока не откроется место. Семя ждёт света, спора — падали рядом.'],
   ];
-  const GENES = GENE_INFO.map(g=>g[0]);
+  const RATE_GENE_INFO = [
+    ['mutRate', 'мутабельность', 0,1, 'Определяет частоту и силу изменений аллелей, свободных генов и правил роста. Мутаций нет при нулевой мутабельности единственного родителя у клона или обоих родителей при скрещивании.'],
+    ['decomp', 'скорость разложения', 0,1, 'Множитель, с которым организм извлекает пищу из мёртвой органики. Пассивный распад в среде идёт отдельно.'],
+    ['tolerance', 'толерантность к паразитам', 0,1, 'Уменьшает энергетический ущерб от инфекции на эту долю. Иммунитет отдельно влияет на заражение и выздоровление.'],
+  ];
+  const GENE_INFO = [...LEGACY_GENE_INFO, ...RATE_GENE_INFO];
+  const LEGACY_GENES = LEGACY_GENE_INFO.map(g=>g[0]), GENES = GENE_INFO.map(g=>g[0]);
+  const geneInfo = () => params.heritableRates ? GENE_INFO : LEGACY_GENE_INFO;
+  const genes = () => params.heritableRates ? GENES : LEGACY_GENES;
   // Какие гены реально работают у данной ниши. Ген photo у травоядного унаследован
   // от предка-фототрофа и придавлен пакетом смены ниши, но дохода не даёт вовсе:
   // свет начисляется единственным местом под условием guild==='photo'. Организм
@@ -816,11 +828,13 @@
   const MOD_SCALE = 0.25, MOD_NEW = 0.25, MOD_DUP = 0.15, MOD_DEL = 0.10, MOD_DRIFT = 0.15, MOD_RETARGET = 0.30;
   const MOD_UPKEEP = 0.003;   // содержание одного гена на клетку в час (metab ~0.3)
   const MOD_TARGETS = GENES.filter(k => k !== 'shapeType' && k !== 'immuneKey');   // категории не сдвигаются
+  const LEGACY_MOD_TARGETS = MOD_TARGETS.filter(k=>LEGACY_GENES.includes(k));
   let nextModId = 1;
   function newMod(){
     const r = Math.random(), n = r < 0.6 ? 1 : r < 0.9 ? 2 : 3;   // плейотропия: один признак чаще всего
     const t = [], w = [];
-    while(t.length < n){ const k = MOD_TARGETS[Math.floor(Math.random()*MOD_TARGETS.length)]; if(!t.includes(k)){ t.push(k); w.push(Math.random()*2-1); } }
+    const targets = params.heritableRates ? MOD_TARGETS : LEGACY_MOD_TARGETS;
+    while(t.length < n){ const k = targets[Math.floor(Math.random()*targets.length)]; if(!t.includes(k)){ t.push(k); w.push(Math.random()*2-1); } }
     return { id: nextModId++, t, w };
   }
   const copyMod = m => ({ id: m.id, t: m.t.slice(), w: m.w.slice() });
@@ -835,7 +849,8 @@
     if(out.length && Math.random() < m*MOD_DUP){
       const c = copyMod(out[Math.floor(Math.random()*out.length)]); c.id = nextModId++;
       if(Math.random() < MOD_RETARGET){ const i = Math.floor(Math.random()*c.t.length);
-        let k; do { k = MOD_TARGETS[Math.floor(Math.random()*MOD_TARGETS.length)]; } while(c.t.includes(k)); c.t[i] = k; }
+        const targets = params.heritableRates ? MOD_TARGETS : LEGACY_MOD_TARGETS;
+        let k; do { k = targets[Math.floor(Math.random()*targets.length)]; } while(c.t.includes(k)); c.t[i] = k; }
       out.push(c);
     }
     if(Math.random() < m*MOD_NEW) out.push(newMod());
@@ -874,14 +889,19 @@
     ]},
   };
   const ZONE_COLOR = { bad:'rgba(255,92,122,0.45)', warn:'rgba(250,204,21,0.32)', good:'rgba(74,222,128,0.55)' };
+  const RATE_NOTES = {
+    mutation:'Для новых организмов-основателей. У потомков изменения задают гены родителей.',
+    decomp:'Для новых организмов-основателей. Они передают этот признак потомкам.',
+    parasites:'Для новых внешних штаммов. При нуле прекращается их появление извне.',
+  };
 
   function paintScale(key){
     const sc = SCALES[key];
     const inp = document.getElementById(sc.el), note = document.getElementById(sc.note);
     if(!inp || !note) return;
-    if(params.openDiet || params.programBodies || params.packageStrength!==1){
+    if(params.heritableRates || params.openDiet || params.programBodies || params.packageStrength!==1){
       inp.style.background='';note.className='scalenote';
-      note.textContent={light:'Приток энергии от света. Оптимум прежнего режима здесь не применяется.',
+      note.textContent=(params.heritableRates && RATE_NOTES[key]) || {light:'Приток энергии от света.',
         mutation:'Изменчивость наследуемых признаков и программы роста.',
         parasites:'Общее давление паразитов; ноль отключает их воздействие.',
         decomp:'Скорость поглощения мёртвой органики. Её запас ограничен энергией погибших тел.'}[key];
@@ -894,7 +914,8 @@
     }).join(', ');
     inp.style.background = `linear-gradient(to right, ${stops})`;
     const v = +inp.value / sc.div;
-    const z = sc.zones.find(([a,b]) => v >= a && v <= b) || sc.zones[sc.zones.length-1];
+    const z = sc.zones.find(([a,b]) => v >= a && v <= b);
+    if(!z){note.className='scalenote';note.textContent='За пределами калибровки.';return;}
     note.className = 'scalenote ' + z[2];
     note.innerHTML = `<b>${z[3]}</b> — ${z[4]}<br><span class="scaleopt">оптимум ${sc.opt[0].toFixed(2)}–${sc.opt[1].toFixed(2)}</span>`;
   }
@@ -997,7 +1018,7 @@
     return params.programBodies ? OpenEvolution.develop(g) : templateOf(g.shapeType,g.shapeA,g.shapeB);
   }
   function applyPackages(g, pg, wasPred, A, B) {
-    return OpenEvolution.assistance(g,params.packageStrength,GENES,DISCRETE,
+    return OpenEvolution.assistance(g,params.packageStrength,genes(),DISCRETE,
       (v,a,b)=>legacyPackages(v,pg,wasPred,a,b),A,B);
   }
   function compatible(a, b){
@@ -1026,7 +1047,7 @@
   // Это и есть размер невыраженного запаса линии, одним числом.
   function heteroOf(b){
     let h = 0, n = 0;
-    for(const k of GENES){
+    for(const k of genes()){
       if(DOMINANT_ONLY.has(k)) continue;
       const [lo,hi] = RANGE[k];
       h += Math.abs(b.al.A[k]-b.al.B[k])/(hi-lo); n++;
@@ -1125,13 +1146,17 @@
 
   // Списки ключей заведены один раз: мутация идёт на каждого потомка, и новые
   // массивы на каждый вызов заметно грузили сборщик мусора.
-  const DRIFT_KEYS = Object.keys(DRIFT), STEP_KEYS = ['minN','maxN','broodSize','shapeA','shapeB'];
-  function mutateAllele(pg, withMacro){
-    const m = params.mutation, g = {};
-    for(const k of GENES) g[k] = pg[k];
+  const STEP_KEYS = ['minN','maxN','broodSize','shapeA','shapeB'];
+  const LEGACY_DRIFT_KEYS = Object.keys(DRIFT);
+  Object.assign(DRIFT,{mutRate:0.15,decomp:0.25,tolerance:0.25});
+  const DRIFT_KEYS = Object.keys(DRIFT);
+  const mutationOf = g => params.heritableRates ? g.mutRate : params.mutation;
+  function mutateAllele(pg, m){
+    const g = {};
+    for(const k of genes()) g[k] = pg[k];
     g.mods = mutateMods(pg.mods, m);
     if (params.programBodies) g.program = OpenEvolution.mutateProgram(pg.program,m);
-    for(const k of DRIFT_KEYS){
+    for(const k of (params.heritableRates ? DRIFT_KEYS : LEGACY_DRIFT_KEYS)){
       const [lo,hi] = RANGE[k];
       g[k] = clamp(pg[k] + (Math.random()*2-1)*DRIFT[k]*m, lo, hi);
     }
@@ -1140,21 +1165,7 @@
       g[k] = clamp(pg[k] + (Math.random() < m*0.45 ? (Math.random()<0.5?-1:1) : 0), lo, hi);
     }
     if(Math.random() < m*0.25) g.shapeType = Math.floor(Math.random()*4);
-    g.maxN = Math.max(g.maxN, g.minN+1);
-    // Крупная мутация перебрасывает ОДИН случайный ген из ВСЕХ восемнадцати.
-    // Раньше список был из девяти: экономические гены дрейфовали, но прыгнуть не могли.
-    if(withMacro && Math.random() < MACRO_MUT_CHANCE){
-      const k = GENES[Math.floor(Math.random()*GENES.length)];
-      const [lo,hi] = RANGE[k];
-      // Размер прыгает КРАТНО, а не в случайную точку диапазона. Потолок у него
-      // теперь далеко (30), и равномерный переброс означал бы, что каждая восьмая
-      // крупная мутация выдаёт план в сотни клеток — это артефакт розыгрыша, а не
-      // мутация. У прочих генов диапазон узкий и осмысленный, там переброс честен.
-      g[k] = (k === 'shapeA' || k === 'shapeB')
-        ? clamp(Math.round(g[k] * (0.5 + Math.random()*1.5)), lo, hi)
-        : (DISCRETE.includes(k) ? lo + Math.floor(Math.random()*(hi-lo+1)) : lo + Math.random()*(hi-lo));
-      g.maxN = Math.max(g.maxN, g.minN+1);
-    }
+    if(!params.heritableRates || m>0) g.maxN = Math.max(g.maxN, g.minN+1);
     return g;
   }
 
@@ -1174,7 +1185,7 @@
   const DOMINANT_ONLY = new Set(['shapeType','immuneKey']);
   function expressGenome(A, B){
     const g = {};
-    for(const k of GENES) g[k] = DOMINANT_ONLY.has(k) ? A[k] : (A[k] + B[k]) * 0.5;
+    for(const k of genes()) g[k] = DOMINANT_ONLY.has(k) ? A[k] : (A[k] + B[k]) * 0.5;
     // свободные гены: ½ веса за копию, поверх базового значения, в долях диапазона
     for(const set of [A.mods, B.mods]) if(set) for(const q of set)
       for(let i=0;i<q.t.length;i++){ const k = q.t[i], [lo,hi] = RANGE[k]; g[k] = clamp(g[k] + 0.5*q.w[i]*MOD_SCALE*(hi-lo), lo, hi); }
@@ -1185,7 +1196,7 @@
   }
   function gamete(al){
     const h = {};
-    for(const k of GENES) h[k] = Math.random() < 0.5 ? al.A[k] : al.B[k];
+    for(const k of genes()) h[k] = Math.random() < 0.5 ? al.A[k] : al.B[k];
     // Свободные гены — по локусам: есть в обоих наборах — уходит в гамету всегда
     // (одна из копий наугад), есть в одном — с вероятностью ½. Это независимое
     // расщепление несцепленных локусов: пол перебирает КОМБИНАЦИИ генов.
@@ -1243,11 +1254,9 @@
       g.__endow = Math.max(g.__endow, 34);   // при плотности добычи ~1 на 300 клеток до неё
       // идти около десяти клеток по клетке в час, а жил хищник ровно десять часов
     }
-    if(before) for(const k of GENES) if(g[k] !== before[k]){ A[k] = g[k]; B[k] = g[k]; }
+    if(before) for(const k of genes()) if(g[k] !== before[k]){ A[k] = g[k]; B[k] = g[k]; }
     return g;
   }
-
-  function mutateGenome(pg, wasPred){ return applyPackages(mutateAllele(pg, true), pg, wasPred); }
 
   // Единая точка сборки генома потомка: мейоз у половых, митоз у клональных.
   // КРУПНАЯ МУТАЦИЯ В ДИПЛОИДЕ ИДЁТ ПО ОБОИМ АЛЛЕЛЯМ. Иначе она наполовину гасится
@@ -1256,11 +1265,12 @@
   // (929/1251/1218 тел, ни одного травоядного, хищника и сапротрофа) и ноль половых
   // линий, потому что и `sexual` не дотягивал до порога. Мелкий дрейф при этом
   // остаётся ПОАЛЛЕЛЬНЫМ — он и создаёт скрытый запас.
-  function macroMutate(A, B){
-    if(Math.random() >= MACRO_MUT_CHANCE) return;
-    const k = GENES[Math.floor(Math.random()*GENES.length)];
+  function macroMutate(A, B, m){
+    const chance = params.heritableRates ? Math.min(1,MACRO_MUT_CHANCE*m/0.12) : MACRO_MUT_CHANCE;
+    if(Math.random() >= chance) return;
+    const loci = genes(), k = loci[Math.floor(Math.random()*loci.length)];
     const [lo,hi] = RANGE[k];
-    // размер прыгает кратно — см. пояснение в mutateAllele
+    // Кратный рост размера удерживает крупную мутацию от скачка к сотням клеток.
     const v = (k === 'shapeA' || k === 'shapeB')
       ? clamp(Math.round(((A[k]+B[k])/2) * (0.5 + Math.random()*1.5)), lo, hi)
       : (DISCRETE.includes(k) ? lo + Math.floor(Math.random()*(hi-lo+1)) : lo + Math.random()*(hi-lo));
@@ -1275,9 +1285,10 @@
   function gameteOf(b){ return gamete(b.al); }
   function childGenome(body, mate, wasPred){
     // Клон — митоз: оба набора копируются как есть, гетерозиготность сохраняется.
-    const A = mutateAllele(mate ? gameteOf(body) : body.al.A, false);
-    const B = mutateAllele(mate ? gameteOf(mate) : body.al.B, false);
-    macroMutate(A, B);
+    const mA = mutationOf(body.g), mB = mate ? mutationOf(mate.g) : mA;
+    const A = mutateAllele(mate ? gameteOf(body) : body.al.A, mA);
+    const B = mutateAllele(mate ? gameteOf(mate) : body.al.B, mB);
+    macroMutate(A, B, (mA+mB)*0.5);
     const g = expressGenome(A, B);
     applyPackages(g, body.g, wasPred, A, B);
     return { g, al: { A, B } };
@@ -1297,6 +1308,7 @@
   function founderGenome(){
     return {
       ...(params.programBodies ? {program:OpenEvolution.founderProgram()} : {}),
+      ...(params.heritableRates ? {mutRate:params.mutation,decomp:params.decomp,tolerance:0} : {}),
       metab: 0.22+Math.random()*0.32, effic: 0.55+Math.random()*0.25,
       thresh: 7+Math.random()*7, costFrac: 0.35+Math.random()*0.2,
       minN: Math.floor(Math.random()*2), maxN: 3+Math.floor(Math.random()*5),
@@ -1412,9 +1424,10 @@
   function fertilize(host, q){
     const hg = host.g;
     const perChild = hg.thresh * hg.costFrac;
-    const A = mutateAllele(q.g, false);
-    const B = mutateAllele(gameteOf(host), false);
-    macroMutate(A, B);
+    const mA = params.heritableRates ? q.mutRate : params.mutation, mB = mutationOf(hg);
+    const A = mutateAllele(q.g, mA);
+    const B = mutateAllele(gameteOf(host), mB);
+    macroMutate(A, B, (mA+mB)*0.5);
     const cg = expressGenome(A, B);
     applyPackages(cg, hg, host.guild === 'pred', A, B);
     const tpl = bodyTemplate(cg).length;
@@ -1538,9 +1551,10 @@
       const differentiated = interiorCount > 0;   // дифференцировка только там, где есть сердцевина
       const interiorFrac = size ? interiorCount/size : 0;
 
-      if(body.par && params.parasites > 0){
+      if(body.par && (params.heritableRates || params.parasites > 0)){
         body.par.load = Math.min(1, body.par.load + 0.03);
-        body.energy -= body.par.load * body.par.vir * params.parasites * size * PAR_DMG;  // крупное тело — крупная мишень
+        const damageScale = params.heritableRates ? 1-g.tolerance : params.parasites;
+        body.energy -= body.par.load * body.par.vir * damageScale * size * PAR_DMG;
         if(Math.random() < 0.004 + g.immunity*0.06) body.par = null;
       } else if(params.parasites <= 0) body.par = null;
       const pace = paceOf(g.metab);   // темп обмена: множитель на весь доход
@@ -1705,7 +1719,7 @@
             }
           } else if(body.guild==='sapro'){
             for(let bi=0; bi<bites; bi++){
-              const drain = Math.min(corpseFood[tgt], g.sapro*params.decomp*9*Math.sqrt(size));
+              const drain = Math.min(corpseFood[tgt], g.sapro*(g.decomp ?? params.decomp)*9*Math.sqrt(size));
               corpseFood[tgt] -= drain;
               body.energy += drain*assim; gained += drain*assim;
               actionCount++; ate = true;
@@ -1838,7 +1852,8 @@
             if(body.energy > gcost + g.thresh*0.4){
               body.energy -= gcost;
               const c0 = body.cells[Math.floor(Math.random()*body.cells.length)];
-              gametes.push({ i: c0, g: gameteOf(body), from: body.id, lineage: body.lineage, age: 0, dx: 0, dy: 0 });
+              gametes.push({ i: c0, g: gameteOf(body), from: body.id, lineage: body.lineage, age: 0, dx: 0, dy: 0,
+                ...(params.heritableRates ? {mutRate:g.mutRate} : {}) });
               gamMadeCount++;
             }
           }
@@ -1914,7 +1929,7 @@
     }
 
     // Передача заражения соседям и спонтанное появление новых штаммов
-    if(params.parasites > 0){
+    if(params.heritableRates || params.parasites > 0){
       for(const body of bodies.values()){
         if(!body.par || body.par.load < 0.25) continue;
         const src = body.cells[Math.floor(Math.random()*body.cells.length)];
@@ -1930,19 +1945,23 @@
             if(host && !host.par) fit = keyDist(body.par.key, host.g.immuneKey) < MATCH_W ? 1 : 0.12;
           }
           if(!host || host.par) continue;
-          if(Math.random() < PAR_INF * virInf(body.par.vir) * fit * (1 - host.g.immunity*0.85)){   // заразнее тот, кто свирепее
+          const inf = params.heritableRates ? body.par.inf : virInf(body.par.vir);
+          if(Math.random() < PAR_INF * inf * fit * (1 - host.g.immunity*0.85)){
             let k = body.par.key + (Math.random()*2-1)*0.04;   // ключ мутирует при передаче
-            const nv = Math.min(VIR_RANGE, Math.max(0, body.par.vir + (Math.random()*2-1)*VIR_MUT));
+            const nv = clamp(body.par.vir + (Math.random()*2-1)*VIR_MUT, 0, params.heritableRates ? STRAIN_VIR_MAX : VIR_RANGE);
             host.par = { key: k<0?k+1:(k>1?k-1:k), vir: nv, load: 0.05 };
+            if(params.heritableRates) host.par.inf = clamp(inf + (Math.random()*2-1)*STRAIN_INF_MUT, 0, 1);
             infectCount++;
             break;
           }
         }
       }
-      if(bodies.size && Math.random() < PAR_SEED){
+      if(params.parasites > 0 && bodies.size && Math.random() < PAR_SEED){
         const arr = [...bodies.values()];
         const v = arr[Math.floor(Math.random()*arr.length)];
-        if(!v.par) v.par = { key: Math.random(), vir: 0.2+Math.random()*0.6, load: 0.05 };
+        if(!v.par) v.par = params.heritableRates
+          ? { key:Math.random(), vir:params.parasites, inf:STRAIN_INF_START, load:0.05 }
+          : { key:Math.random(), vir:0.2+Math.random()*0.6, load:0.05 };
       }
     }
     hours++;
@@ -2165,9 +2184,20 @@
       }
     }
   }
-  function updateStats(announce=true){
+  function rateAverages(){
+    if(!params.heritableRates) return null;
+    let mutation=0, decomp=0, tolerance=0, virulence=0, infectivity=0, infected=0;
+    for(const b of bodies.values()){
+      mutation+=b.g.mutRate; decomp+=b.g.decomp; tolerance+=b.g.tolerance;
+      if(b.par){ virulence+=b.par.vir; infectivity+=b.par.inf; infected++; }
+    }
+    const n=bodies.size;
+    return {mutation:n ? mutation/n : null, decomp:n ? decomp/n : null, tolerance:n ? tolerance/n : null,
+      virulence:infected ? virulence/infected : null, infectivity:infected ? infectivity/infected : null};
+  }
+  function updateStats(announce=true, rates=rateAverages()){
     const om=OpenEvolution.metrics(bodies);
-    const mode=!params.openDiet&&!params.programBodies&&params.packageStrength===1?'legacy':params.openDiet&&params.programBodies&&params.packageStrength===0?'open':'custom';
+    const mode=modelMode();
     if(document.getElementById('modelMode').value!==mode) updateModelUI();
     document.getElementById('assistance').value=Math.round(params.packageStrength*100);
     document.getElementById('lblAssistance').textContent=(params.packageStrength*100).toFixed(1)+'%';
@@ -2192,6 +2222,11 @@
     }
     if(announce)announceEvents();
     const set = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent = v; };
+    const average = (v,d=2,scale=1) => v===null ? '—' : (v*scale).toFixed(d)+(scale===100?'%':'');
+    set('meanMut', rates ? 'Среднее по организмам '+average(rates.mutation,1,100) : '');
+    set('meanRegen', rates ? 'Среднее по организмам '+average(rates.decomp) : '');
+    set('meanPar', rates ? 'Текущие инфекции · вред '+average(rates.virulence)+' · заразность '+average(rates.infectivity,1,100)
+      +' · толерантность хозяев в популяции '+average(rates.tolerance,1,100) : '');
     set('sPop', pop); set('sCorpse', corpses); set('sLineages', knownLineages.size);
     set('sExtinct', extinctCount); set('sFights', actionCount); set('sMoves', moveCount);
     set('sSpores', sporeGermCount);
@@ -2224,8 +2259,7 @@
     // по нишам такой зверь неотличим от обычного
     set('sMyco', mycoN ? `${(mycoSum/mycoN).toFixed(2)} · микофагов ${Math.round(100*mycoHigh/mycoN)}%` : '—');
     set('sSex', bodies.size ? `${Math.round(dioN/bodies.size*100)}% раздельнополых, самцов ${dioN?Math.round(maleN/dioN*100):0}%` : '0');
-    // средняя свирепость — то, что эволюционирует само; потолок 1.6 для масштаба
-    set('sVir', virN ? `${(virS/virN).toFixed(2)} из 1.60` : '—');
+    set('sVir', virN ? `${(virS/virN).toFixed(2)} из ${(params.heritableRates?STRAIN_VIR_MAX:VIR_RANGE).toFixed(2)}` : '—');
     set('sInf', bodies.size ? `${infN} (${Math.round(infN/bodies.size*100)}%)` : '0');
     // Разброс замков — главный признак гонки Красной Королевы. Для равномерного
     // распределения предел равен 0.289; всё, что около него, означает, что паразит
@@ -2294,7 +2328,7 @@
     let interior = 0;
     for(const i of b.cells) if(!isBorder(b,i)) interior++;
     const plan = bodyTemplate(g).length;
-    const rows = GENE_INFO.map(([k,label,lo,hi,desc])=>{
+    const rows = geneInfo().map(([k,label,lo,hi,desc])=>{
       const v = g[k];
       const on = geneActive(k, b.guild);
       if(params.programBodies && (k==='shapeType'||k==='shapeB')) return '';
@@ -2325,7 +2359,8 @@
       + (b.sex === 'm' ? ' · <b>самец</b> — зачатков не носит, весь вклад через гаметы'
          : b.sex === 'f' ? ' · <b>самка</b> — гамет не выпускает, вынашивает дешевле'
          : ' · <b>гермафродит</b> — и выпускает, и вынашивает, но без скидок')
-      + (b.par ? ` · <b>заражён</b>, свирепость штамма ${b.par.vir.toFixed(2)}` : '')
+      + (b.par ? ` · <b>заражён</b>, вред штамма ${b.par.vir.toFixed(2)}`
+        + (params.heritableRates ? `, заразность ${(100*b.par.inf).toFixed(1)}%` : '') : '')
       + (b.al.A === b.al.B
           ? ' · <b>гаплоид</b> — один набор генов, скрывать нечего'
           : ` · <b>диплоид</b>, гетерозиготность ${(heteroOf(b)*100).toFixed(1)}%`
@@ -2385,27 +2420,37 @@
   function sliderFromSpeed(rate){ return Math.round(100*Math.log(rate)/Math.log(100000)); }
 
 
+  function modelMode(){
+    if(!params.heritableRates&&!params.openDiet&&!params.programBodies&&params.packageStrength===1) return 'legacy';
+    return params.heritableRates&&params.openDiet&&params.programBodies&&params.packageStrength===0?'open':'custom';
+  }
   function updateModelUI(){
     document.getElementById('openDiet').checked=params.openDiet;
     document.getElementById('programBodies').checked=params.programBodies;
     document.getElementById('assistance').value=Math.round(params.packageStrength*100);
     document.getElementById('lblAssistance').textContent=Math.round(params.packageStrength*100)+'%';
-    const legacy=!params.openDiet&&!params.programBodies&&params.packageStrength===1;
+    const mode=modelMode(), legacy=mode==='legacy';
     document.getElementById('btnTaper').disabled=params.packageStrength<=0 || !!params.assistanceRamp;
-    document.getElementById('modelMode').value=legacy?'legacy':params.openDiet&&params.programBodies&&params.packageStrength===0?'open':'custom';
+    document.getElementById('modelMode').value=mode;
+    document.getElementById('titleMut').textContent=params.heritableRates?'Мутабельность основателей':'Сила мутации';
+    document.getElementById('titleRegen').textContent=params.heritableRates?'Разложение у основателей':'Скорость разложения';
+    document.getElementById('titlePar').textContent=params.heritableRates?'Вред новых штаммов':'Давление паразитов';
+    updatePresetNote();
     paintAllScales();
     document.querySelectorAll('.legacy-explanation').forEach(e=>e.hidden=!legacy);
     document.querySelectorAll('.open-explanation').forEach(e=>e.hidden=legacy);
     document.getElementById('modelNote').textContent=legacy?'Прежние ниши, четыре фигуры и полная помощь переходам.':'Цвет показывает главный источник полученной энергии. При ненулевой помощи линии получают дополнительные изменения и стартовый запас. Изменение питания или роста перезапускает мир. Помощь меняется без перезапуска. Калибровка старых пресетов к этим правилам не относится.';
     document.querySelectorAll('.scaleopt').forEach(e=>{if(e.id!=='modelNote')e.hidden=!legacy;});
     const geneRef=document.getElementById('geneRef');
-    if(geneRef) geneRef.innerHTML=GENE_INFO.filter(([k])=>!params.programBodies||!['shapeType','shapeB'].includes(k)).map(([k,label,lo,hi,desc])=>`<tr><th>${label}<span class="gk">${k}</span></th><td class="gr">${lo}…${hi}</td><td class="gd">${geneDescription(k,desc)}</td></tr>`).join('');
+    if(geneRef) geneRef.innerHTML=geneInfo().filter(([k])=>!params.programBodies||!['shapeType','shapeB'].includes(k)).map(([k,label,lo,hi,desc])=>`<tr><th>${label}<span class="gk">${k}</span></th><td class="gr">${lo}…${hi}</td><td class="gd">${geneDescription(k,desc)}</td></tr>`).join('');
   }
   function restartModel(){running=false;document.getElementById('btnPlay').textContent='Старт';updateModelUI();reset();}
   document.getElementById('modelMode').addEventListener('change',e=>{
-    const open=e.target.value==='open';params.openDiet=open;params.programBodies=open;params.packageStrength=open?0:1;restartModel();
+    const open=e.target.value==='open';params.openDiet=open;params.programBodies=open;params.heritableRates=open;params.packageStrength=open?0:1;restartModel();
   });
-  for(const key of ['openDiet','programBodies']) document.getElementById(key).addEventListener('change',e=>{params[key]=e.target.checked;restartModel();});
+  for(const key of ['openDiet','programBodies']) document.getElementById(key).addEventListener('change',e=>{
+    params[key]=e.target.checked;params.heritableRates=params.openDiet||params.programBodies;restartModel();
+  });
   document.getElementById('btnTaper').addEventListener('click',()=>{params.assistanceRamp={from:params.packageStrength,start:hours,duration:1000};updateModelUI();});
   document.getElementById('assistance').addEventListener('input',e=>{document.getElementById('lblAssistance').textContent=e.target.value+'%';});
   document.getElementById('assistance').addEventListener('change',e=>{params.packageStrength=Number(e.target.value)/100;params.assistanceRamp=null;updateModelUI();});
@@ -2500,10 +2545,16 @@
     poor:     { light:1.00, mut:0.04, decomp:0.30, par:2.0, pred:true, sex:true, dn:true,
       note:'Пара к «Богатому геному»: всё то же, кроме мутации — 0.04 вместо 0.30. Свободных генов 1.1 против 6.2, а мир живёт не хуже (2395 тел, полная цепь). Богатство генома решает мутация, а не среда: свет и разложение двигают его втрое слабее.' },
   };
+  function updatePresetNote(){
+    const p=PRESETS[document.getElementById('preset').value];
+    document.getElementById('notePreset').textContent=p
+      ? (params.heritableRates?'Стартовые настройки основателей и среды.':p.note)
+      : 'Свой набор настроек — двигай ползунки ниже.';
+  }
   document.getElementById('preset').addEventListener('change', e=>{
     const p = PRESETS[e.target.value];
-    const note = document.getElementById('notePreset');
-    if(!p){ note.textContent = 'Свой набор настроек — двигай ползунки ниже.'; return; }
+    updatePresetNote();
+    if(!p) return;
     params.light = p.light; params.mutation = p.mut; params.decomp = p.decomp;
     params.parasites = p.par; params.predation = p.pred; params.sexReprod = p.sex; params.dayNight = p.dn;
     const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
@@ -2517,7 +2568,6 @@
     document.getElementById('lblRegen').textContent = p.decomp.toFixed(2);
     document.getElementById('lblPar').textContent = p.par.toFixed(2);
     ['light','mutation','decomp','parasites'].forEach(paintScale);
-    note.textContent = p.note;
     // Пресет перезапускает чашку: прежний мир уже сложился под старые правила,
     // и менять их на ходу значит смотреть не на режим, а на его последствия.
     reset();
@@ -2537,14 +2587,14 @@
   // справочник генов на странице строится из того же GENE_INFO, что и инспектор —
   // разойтись с кодом он не может по устройству
   const ref = document.getElementById('geneRef');
-  if(ref) ref.innerHTML = GENE_INFO.map(([k,label,lo,hi,desc])=>
+  if(ref) ref.innerHTML = geneInfo().map(([k,label,lo,hi,desc])=>
     `<tr><th>${label}<span class="gk">${k}</span></th><td class="gr">${lo}…${hi}</td><td class="gd">${desc}</td></tr>`).join('');
 
   document.getElementById('speed').value = sliderFromSpeed(params.hoursPerMinute);
   document.getElementById('lblSpeed').textContent = params.hoursPerMinute.toLocaleString('ru-RU')+' ч/мин';
 
   function saveWorld(){
-    return {version:1,params:{...params},state,owner,corpseFood,sporeDensity,fertility,cellGuild,
+    return {version:2,params:{...params},state,owner,corpseFood,sporeDensity,fertility,cellGuild,
       bodies:[...bodies.values()],gametes,seeds,nextBodyId,nextLineageId,nextModId,
       hours,extinctCount,actionCount,moveCount,sporeGermCount,sexBirths,infectCount,
       popHistory,knownLineages:[...knownLineages],lineageHueJitter,phaseX,phaseY,dayFactor,
@@ -2553,8 +2603,8 @@
       sporeRotCount,eggMadeCount,eggHatchCount,eggRotCount,gamMadeCount,gamHitCount,gamLostCount};
   }
   function restoreWorld(s){
-    if(s.version!==1 || s.state.length!==N || s.owner.length!==N) throw Error('Несовместимое сохранение мира');
-    Object.assign(params,s.params);OpenEvolution.restoreState(s.openState);
+    if((s.version!==1 && s.version!==2) || s.state.length!==N || s.owner.length!==N) throw Error('Несовместимое сохранение мира');
+    Object.assign(params,s.params,{heritableRates:s.version===2 && s.params.heritableRates});OpenEvolution.restoreState(s.openState);
     state.set(s.state);owner.set(s.owner);corpseFood.set(s.corpseFood);sporeDensity.set(s.sporeDensity);
     fertility.set(s.fertility);cellGuild.set(s.cellGuild);
     bodies.clear();for(const b of s.bodies){
@@ -2572,7 +2622,7 @@
   }
   window.evolutioner = {params,bodies,step,reset,render,updateStats,bodyTemplate,saveWorld,restoreWorld,
     founderGenome,founderDiploid,tryPlaceBody,childGenome,applyPackages,spawnFounder,
-    presets:PRESETS,geneInfo:GENE_INFO,geneDescription,geneActive,scales:SCALES,random:()=>Math.random(),modScale:MOD_SCALE,heteroOf,announceEvents,
+    presets:PRESETS,get geneInfo(){return geneInfo();},geneDescription,geneActive,scales:SCALES,rateAverages,rateNotes:RATE_NOTES,modelMode,random:()=>Math.random(),modScale:MOD_SCALE,heteroOf,announceEvents,
     get hours(){return hours;},get state(){return state;},get owner(){return owner;},
     get corpseFood(){return corpseFood;},
     get seeds(){return seeds;},get gametes(){return gametes;},

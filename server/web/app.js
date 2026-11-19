@@ -67,7 +67,7 @@ function update(s){
   if(connectionError){$('error').textContent='';connectionError=false;}
   frame=s;draw(s);drawChart(s.history);
   updateDashboard(s);
-  const mode=s.params.openDiet+'-'+s.params.programBodies;
+  const mode=s.params.openDiet+'-'+s.params.programBodies+'-'+s.params.heritableRates;
   if(catalogMode!==mode&&!catalogLoading)loadCatalog(mode);
   $('dot').classList.add('online');$('connection').textContent=s.running?'Сервер считает · связь установлена':'Расчёт на паузе · связь установлена';
   $('clock').textContent='День '+number(Math.floor(s.hours/24)+1)+' · '+number(s.hours)+' ч';
@@ -93,7 +93,7 @@ function update(s){
   updateSpeedStatus(s);
   if(!$('resetDialog').open){
     $('openDiet').checked=s.params.openDiet;$('programBodies').checked=s.params.programBodies;
-    $('modelMode').value=!s.params.openDiet&&!s.params.programBodies&&s.params.packageStrength===1?'legacy':s.params.openDiet&&s.params.programBodies&&s.params.packageStrength===0?'open':'custom';
+    $('modelMode').value=s.mode;
   }
   updateScaleNotes(s);
   if(document.activeElement!==$('assistance'))$('assistance').value=s.params.packageStrength*100;
@@ -153,11 +153,19 @@ async function loadCatalog(mode){
 }
 function updateScaleNotes(s){
   if(!s)return;
-  const legacy=!s.params.openDiet&&!s.params.programBodies&&s.params.packageStrength===1;
+  const legacy=s.mode==='legacy', inherited=s.params.heritableRates;
+  $('mutationTitle').textContent=inherited?'Мутабельность основателей':'Мутации';
+  $('decompTitle').textContent=inherited?'Разложение у основателей':'Разложение';
+  $('parasitesTitle').textContent=inherited?'Вред новых штаммов':'Давление паразитов';
+  for(const id of ['meanMut','meanRegen','meanPar']){
+    $(id).hidden=!inherited;
+    $(id).textContent=s.readouts[id]||'';
+  }
+  updatePresetNote();
   const meaning={light:'Общий множитель поступающего света.',mutation:'Сила наследуемых изменений: 0% выключает мутации, 100% задаёт максимальную силу.',decomp:'Скорость разложения органики и её доступности сапротрофам.',parasites:'Общий множитель вреда от паразитов; признаки штаммов эволюционируют отдельно.'};
   for(const key of Object.keys(meaning)){
     const zone=catalog?.scales[key]?.zones.find(z=>s.params[key]>=z[0]&&s.params[key]<=z[1]);
-    $(key+'Note').textContent=meaning[key]+(legacy&&zone?' Прежняя калибровка: '+zone[3]+' — '+zone[4]+'.':'');
+    $(key+'Note').textContent=(inherited&&key!=='light' ? catalog?.rateNotes?.[key]||'' : meaning[key])+(legacy&&zone?' Прежняя калибровка: '+zone[3]+' — '+zone[4]+'.':'');
     $(key+'Note').dataset.zone=legacy&&zone?zone[2]:'';
   }
 }
@@ -169,7 +177,8 @@ async function inspect(url){
     selected=b.id;$('refreshBody').hidden=false;$('bodyHint').textContent='Организм #'+b.id+' · линия #'+b.lineage+'. Данные на момент запроса.';
     table([['Возраст',number(b.age)+' из '+number(b.genome.lifespan)+' ч'],['Тело',b.cells.length+' из '+b.planned+' клеток плана'],['Внутренних / барьерных клеток',b.interior+' / '+(b.cells.length-b.interior)],['Энергия',number(b.energy)],['Вложено в структуру',number(b.structuralEnergy)],['Основное питание',names[b.guild]],['Пол',b.sex==='m'?'мужской':b.sex==='f'?'женский':'гермафродит'],['Паразиты',b.infected?'есть':'нет']],content);
     const total=Object.values(b.intake).reduce((a,v)=>a+v,0);
-    text('p','Гетерозиготность: '+number(b.heterozygosity*100)+'%'+(b.infected?' · свирепость штамма '+number(b.virulence):''),content,'hint');
+    text('p','Гетерозиготность: '+number(b.heterozygosity*100)+'%'+(b.infected?' · вред штамма '+number(b.virulence):'')
+      +(b.infectivity===null?'':' · заразность '+number(b.infectivity*100)+'%'),content,'hint');
     text('h3','Полученная энергия за жизнь',content);
     table(Object.entries(names).map(([k,name])=>[name,number(b.intake[k]||0)+(total?' · '+number((b.intake[k]||0)/total*100)+'%':'')]),content);
     text('h3','Правила роста',content);
@@ -235,10 +244,13 @@ function askReset(action,title){
   $('startSummary').textContent='Основателей: '+$('founders').value+' · начальное число: '+$('seed').value;
   $('resetError').textContent='';$('resetDialog').showModal();
 }
-$('preset').addEventListener('change',()=>{
+function updatePresetNote(){
   const p=catalog?.presets.find(p=>p.id===$('preset').value);$('applyPreset').disabled=!p;
-  $('notePreset').textContent=p?p.note:'Свой набор настроек — двигайте ползунки ниже.';
-});
+  $('notePreset').textContent=p
+    ? (frame?.params.heritableRates?'Стартовые настройки основателей и среды.':p.note)
+    : 'Свой набор настроек — двигайте ползунки ниже.';
+}
+$('preset').addEventListener('change',updatePresetNote);
 $('applyPreset').addEventListener('click',()=>askReset({type:'preset',id:$('preset').value},'Применить «'+catalog.presets.find(p=>p.id===$('preset').value).title+'»?'));
 $('modelMode').addEventListener('change',()=>{
   const open=$('modelMode').value==='open';askReset({type:'rules',openDiet:open,programBodies:open,packageStrength:open?0:1},'Сменить модель и начать новый мир?');

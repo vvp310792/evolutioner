@@ -3,7 +3,7 @@ const sim=require('./browser-model')();
 const [mode='zero',seedText='1',lightText='0.8',hoursText='2000']=process.argv.slice(2);
 if(!['zero','full','abrupt','ramp','legacy'].includes(mode)) throw Error('Неизвестный режим');
 const seed=Number(seedText),light=Number(lightText),hours=Number(hoursText);
-Object.assign(sim.params,{openDiet:mode!=='legacy',programBodies:mode!=='legacy',
+Object.assign(sim.params,{openDiet:mode!=='legacy',programBodies:mode!=='legacy',heritableRates:mode!=='legacy',
   packageStrength:mode==='zero'?0:1,light});
 sim.reset(24,seed);
 const samples=[];

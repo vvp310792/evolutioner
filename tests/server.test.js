@@ -26,6 +26,7 @@ test('второй мир не сбрасывает счётчики перво�
 
 test('сохранение продолжает тот же случайный мир, включая следующие рождения',()=>{
   const a=createModel(19);a.model.params.mutation=.5;
+  a.model.reset();
   for(let h=0;h<180;h++)a.model.step();
   const saved=decode(encode(a.model.save())),events=a.model.events();
   const b=createModel(999);b.model.restore(saved);b.model.restoreEvents(events);
@@ -39,7 +40,8 @@ test('сохранение продолжает тот же случайный �
 });
 test('полная панель: все пресеты из HTML, показатели без изменения мира, оба набора генов',()=>{
   const world=createModel(19),catalog=world.catalog();
-  assert.equal(catalog.presets.length,15);assert.equal(catalog.genes.length,26);
+  assert.equal(catalog.presets.length,15);assert.equal(catalog.genes.length,29);
+  assert.deepEqual(catalog.genes.slice(-3).map(g=>g.key),['mutRate','decomp','tolerance']);
   assert.deepEqual(catalog.presets.map(p=>p.id),Object.keys(world.model.api.presets));
   for(const p of catalog.presets){
     assert.ok(p.title&&p.note);world.apply({type:'preset',id:p.id,founders:12,seed:7});
@@ -52,6 +54,7 @@ test('полная панель: все пресеты из HTML, показат
   const before=digest(world.model.save()),frame=world.frame();assert.equal(digest(world.model.save()),before);
   for(const id of ['sPop','sCorpse','sLineages','sExtinct','sFights','sMoves','sSpores','sMyco','sSex','sVir','sGam','sSeeds','sSeedGerm','sBodies','sMaxBody','sDiff','sMods','sInf','sKey','sSexB','sLight','sTraits','sTraits2','sOpen','trioLegend'])assert.ok(Object.hasOwn(frame.readouts,id),id);
   assert.equal(Number(frame.readouts.sPop),frame.cells);
+  assert.equal(frame.rates,null);assert.equal(frame.mode,'legacy');
   const body=world.detailById(world.model.bodies.keys().next().value);
   assert.equal(body.genes.length,26);assert.ok(body.alleles.A&&body.alleles.B);assert.ok(body.genes.every(g=>g.description.length));
   const org=world.model.bodies.size,hours=world.model.api.hours;

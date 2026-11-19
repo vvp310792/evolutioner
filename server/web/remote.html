@@ -11,12 +11,15 @@
 <section class="panel" id="controls"><div class="panel-heading"><h2>Ход эволюции</h2><button id="toggle" class="small">—</button></div><label for="speedSlider">Желаемая скорость <output id="speedValue">—</output></label><input id="speedSlider" type="range" min="0" max="100" step="0.1" value="58.5"><label for="speed">Точное значение, часов мира в минуту</label><input id="speed" type="number" min="1" max="600000" step="1" value="2400"><p class="hint">Сервер принял цель: <span id="serverSpeed">—</span>.</p><p class="speed-readout">Фактическая скорость: <strong id="speedActual">—</strong></p><p id="speedLimit" class="hint" role="status"></p><p class="hint">Слайдер задаёт скорость расчёта общего мира. Если сервер достиг предела, увеличение цели не ускорит мир. Диапазон от 1 до 600 000 ч/мин; шкала логарифмическая. Картинка обновляется до 2 раз в секунду.</p>
 <label for="light">Свет <output id="lightValue">—</output></label><input id="light" type="range" min="0" max="2" step="0.01" data-param="light">
 <p id="lightNote" class="hint"></p>
-<label for="mutation">Мутации <output id="mutationValue">—</output></label><input id="mutation" type="range" min="0" max="1" step="0.01" data-param="mutation">
+<label for="mutation"><span id="mutationTitle">Мутабельность основателей</span> <output id="mutationValue">—</output></label><input id="mutation" type="range" min="0" max="1" step="0.01" data-param="mutation">
 <p id="mutationNote" class="hint"></p>
-<label for="decomp">Разложение <output id="decompValue">—</output></label><input id="decomp" type="range" min="0" max="1" step="0.01" data-param="decomp">
+<p id="meanMut" class="hint" hidden></p>
+<label for="decomp"><span id="decompTitle">Разложение у основателей</span> <output id="decompValue">—</output></label><input id="decomp" type="range" min="0" max="1" step="0.01" data-param="decomp">
 <p id="decompNote" class="hint"></p>
-<label for="parasites">Паразиты <output id="parasitesValue">—</output></label><input id="parasites" type="range" min="0" max="3" step="0.05" data-param="parasites">
+<p id="meanRegen" class="hint" hidden></p>
+<label for="parasites"><span id="parasitesTitle">Вред новых штаммов</span> <output id="parasitesValue">—</output></label><input id="parasites" type="range" min="0" max="3" step="0.05" data-param="parasites">
 <p id="parasitesNote" class="hint"></p>
+<p id="meanPar" class="hint" hidden></p>
 <div class="switches"><label><input id="dayNight" type="checkbox" data-switch="dayNight"> День и ночь</label><label><input id="predation" type="checkbox" data-switch="predation"> Хищничество</label><label><input id="sexReprod" type="checkbox" data-switch="sexReprod"> Половое размножение</label></div>
 <div class="divider"></div><label for="assistance">Помощь новым линиям <output id="assistanceValue">—</output></label><input id="assistance" type="range" min="0" max="100" step="1"><p class="hint">0% — без бонусов. 100% — полные прежние усиления при смене питания, увеличении тела и возникновении половой линии. Уже полученные гены сохраняются.</p><button id="taper" class="secondary">Снизить до 0 за 1000 часов</button><p id="ramp" class="hint"></p>
 <div class="divider"></div><div class="button-row"><button id="save" class="secondary">Сохранить сейчас</button><button id="reset" class="quiet danger">Новый мир</button></div><p class="hint">Мир сохраняется каждые 30 секунд и перед остановкой службы. Закрытие вкладки продолжает эволюцию.</p></section>

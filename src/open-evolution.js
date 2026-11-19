@@ -158,7 +158,7 @@
       const bites=Math.min(w.border.length,6)*feeding, processing=body.tpl?.roles?1:1+0.35*w.interior;
       // Скорость обмена повышает пропускную способность; доля усвоения остаётся < 1.
       if (target.dead) {
-        const drain=Math.min(w.corpseFood[target.t],g.sapro*w.params.decomp*9*Math.sqrt(size)*bites*w.pace);
+        const drain=Math.min(w.corpseFood[target.t],g.sapro*(g.decomp ?? w.params.decomp)*9*Math.sqrt(size)*bites*w.pace);
         w.corpseFood[target.t]=Math.max(0,w.corpseFood[target.t]-drain);
         gained=drain*Math.min(0.9,0.8*g.effic*processing);
         intake(body,'sapro',gained);

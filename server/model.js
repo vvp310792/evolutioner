@@ -31,7 +31,7 @@ function createModel(seed=19){
     if(!body)return null;
     return {id:body.id,lineage:body.lineage,age:body.age,energy:body.energy,structuralEnergy:body.structuralEnergy||0,
       cells:body.cells,planned:body.tpl.length,guild:body.guild,sex:body.sex,infected:!!body.par,
-      virulence:body.par?.vir??null,heterozygosity:model.api.heteroOf(body),modScale:model.api.modScale,
+      virulence:body.par?.vir??null,infectivity:body.par?.inf??null,heterozygosity:model.api.heteroOf(body),modScale:model.api.modScale,
       intake:body.intake||{},genome:body.g,alleles:body.al,
       interior:body.cells.filter(i=>[i-46,i+46,i%46?i-1:-1,i%46<45?i+1:-1].every(j=>j>=0&&j<46*92&&model.api.owner[j]===body.id)).length,
       genes:model.api.geneInfo.map(([key,label,min,max,desc])=>({key,label,min,max,description:model.api.geneDescription(key,desc).replace(/<[^>]*>/g,''),active:model.api.geneActive(key,body.guild)})),
@@ -39,7 +39,8 @@ function createModel(seed=19){
   }
   function catalog(){
     return {presets:Object.entries(model.api.presets).map(([id,p])=>({id,title:model.presetTitles[id],note:p.note,values:{light:p.light,mutation:p.mut,decomp:p.decomp,parasites:p.par,predation:p.pred,sexReprod:p.sex,dayNight:p.dn}})),
-      genes:model.api.geneInfo.map(([key,label,min,max,desc])=>({key,label,min,max,description:model.api.geneDescription(key,desc).replace(/<[^>]*>/g,''),unused:model.params.programBodies&&['shapeType','shapeB'].includes(key)})),scales:model.api.scales};
+      genes:model.api.geneInfo.map(([key,label,min,max,desc])=>({key,label,min,max,description:model.api.geneDescription(key,desc).replace(/<[^>]*>/g,''),unused:model.params.programBodies&&['shapeType','shapeB'].includes(key)})),
+      scales:model.api.scales,rateNotes:model.api.rateNotes};
   }
   function frame(){
     const api=model.api,grid=Buffer.alloc(46*92*4),owners=Buffer.alloc(46*92*4);
@@ -55,8 +56,9 @@ function createModel(seed=19){
     }
     for(const s of api.seeds)grid[s.i*4+3]|=s.kind===2?32:s.kind===1?16:8;
     for(const g of api.gametes)grid[g.i*4+3]|=64;
+    const rates=api.rateAverages();
     return {...model.snapshot(),cols:46,rows:92,counts,seeds:api.seeds.length,gametes:api.gametes.length,
-      params:{...model.params},grid:grid.toString('base64'),owners:owners.toString('base64'),readouts:model.readouts(),events:model.events(),
+      params:{...model.params},mode:api.modelMode(),rates,grid:grid.toString('base64'),owners:owners.toString('base64'),readouts:model.readouts(rates),events:model.events(),
       sexualLines:[...api.bodies.values()].filter(b=>b.g.sexual>=.5).length};
   }
   return {model,frame,catalog,detailById:id=>detail(model.bodies.get(id)),
@@ -71,7 +73,8 @@ function createModel(seed=19){
         const p=catalog().presets.find(p=>p.id===c.id);
         Object.assign(model.params,p.values);model.reset(c.founders,c.seed);
       }else if(c.type==='rules'){
-        Object.assign(model.params,{openDiet:c.openDiet,programBodies:c.programBodies,packageStrength:c.packageStrength});
+        Object.assign(model.params,{openDiet:c.openDiet,programBodies:c.programBodies,
+          heritableRates:c.openDiet||c.programBodies,packageStrength:c.packageStrength});
         model.reset(c.founders,c.seed);
       }else if(c.type==='seed'){
         let placed=0;for(let guard=0;guard<3000&&placed<6;guard++){
